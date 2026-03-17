@@ -74,8 +74,7 @@ fn test_env_both_forms() {
 #[test]
 fn test_unknown_instructions() {
     let input = include_str!("fixtures/parser/unknown_instructions.dockerfile");
-    let instructions =
-        parse_dockerfile(input).expect("unknown instructions must not error");
+    let instructions = parse_dockerfile(input).expect("unknown instructions must not error");
     // FROM + ARG + LABEL + CMD + EXPOSE = 5
     assert_eq!(instructions.len(), 5);
     assert!(matches!(instructions[0], Instruction::From { .. }));
@@ -88,8 +87,7 @@ fn test_unknown_instructions() {
 #[test]
 fn test_comments_and_blanks() {
     let input = include_str!("fixtures/parser/comments_and_blanks.dockerfile");
-    let instructions =
-        parse_dockerfile(input).expect("should skip comments and blanks");
+    let instructions = parse_dockerfile(input).expect("should skip comments and blanks");
     // FROM + WORKDIR + COPY = 3 (2 comments and 2 blanks are dropped)
     assert_eq!(instructions.len(), 3);
     assert!(matches!(instructions[0], Instruction::From { .. }));
@@ -139,8 +137,8 @@ fn test_malformed_copy_returns_error() {
 #[test]
 fn test_copy_with_from_flag_becomes_unknown() {
     let input = include_str!("fixtures/parser/copy_with_from_flag.dockerfile");
-    let instructions = parse_dockerfile(input)
-        .expect("COPY --from should not error, becomes Unknown");
+    let instructions =
+        parse_dockerfile(input).expect("COPY --from should not error, becomes Unknown");
     assert_eq!(instructions.len(), 2);
     assert!(matches!(instructions[0], Instruction::From { .. }));
     // COPY --from=builder is unsupported in v0.1 → Unknown

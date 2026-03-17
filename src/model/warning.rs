@@ -72,11 +72,7 @@ impl fmt::Display for Warning {
                 )
             }
             Warning::UnsupportedGlob { pattern } => {
-                write!(
-                    f,
-                    "glob pattern '{}' is not modeled; copy skipped",
-                    pattern
-                )
+                write!(f, "glob pattern '{}' is not modeled; copy skipped", pattern)
             }
             Warning::UnmodeledRunCommand { command } => {
                 write!(
