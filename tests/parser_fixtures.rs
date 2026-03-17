@@ -78,10 +78,18 @@ fn test_unknown_instructions() {
     // FROM + ARG + LABEL + CMD + EXPOSE = 5
     assert_eq!(instructions.len(), 5);
     assert!(matches!(instructions[0], Instruction::From { .. }));
-    assert!(matches!(instructions[1], Instruction::Unknown { .. }));
-    assert!(matches!(instructions[2], Instruction::Unknown { .. }));
-    assert!(matches!(instructions[3], Instruction::Unknown { .. }));
-    assert!(matches!(instructions[4], Instruction::Unknown { .. }));
+    // Each unknown instruction must preserve the original raw line text so the
+    // engine can surface it in history and warnings.
+    let raw_lines = ["ARG VERSION=1.0", "LABEL maintainer=test", "CMD [\"/bin/sh\"]", "EXPOSE 8080"];
+    for (i, expected_raw) in raw_lines.iter().enumerate() {
+        match &instructions[i + 1] {
+            Instruction::Unknown { raw } => assert_eq!(
+                raw, expected_raw,
+                "instruction[{}] raw text mismatch", i + 1
+            ),
+            other => panic!("expected Unknown at [{}], got {:?}", i + 1, other),
+        }
+    }
 }
 
 #[test]
@@ -90,9 +98,21 @@ fn test_comments_and_blanks() {
     let instructions = parse_dockerfile(input).expect("should skip comments and blanks");
     // FROM + WORKDIR + COPY = 3 (2 comments and 2 blanks are dropped)
     assert_eq!(instructions.len(), 3);
-    assert!(matches!(instructions[0], Instruction::From { .. }));
-    assert!(matches!(instructions[1], Instruction::Workdir { .. }));
-    assert!(matches!(instructions[2], Instruction::Copy { .. }));
+    assert_eq!(
+        instructions[0],
+        Instruction::From { image: "scratch".to_string(), alias: None }
+    );
+    assert_eq!(
+        instructions[1],
+        Instruction::Workdir { path: PathBuf::from("/app") }
+    );
+    assert_eq!(
+        instructions[2],
+        Instruction::Copy {
+            source: CopySource::Host(PathBuf::from(".")),
+            dest: PathBuf::from("/app"),
+        }
+    );
 }
 
 #[test]

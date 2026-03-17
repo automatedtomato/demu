@@ -316,6 +316,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_workdir_relative_path_is_accepted() {
+        // The parser does not validate whether WORKDIR paths are absolute —
+        // that is the engine's responsibility when resolving against cwd.
+        // Document this policy with an explicit test so future contributors
+        // know the parser's contract.
+        let result = parse_workdir("app/subdir", 1).expect("relative WORKDIR must be accepted by parser");
+        assert_eq!(result, Instruction::Workdir {
+            path: std::path::PathBuf::from("app/subdir"),
+        });
+    }
+
+    #[test]
     fn parse_workdir_empty_returns_error() {
         let result = parse_workdir("", 5);
         assert!(result.is_err());
@@ -410,6 +422,18 @@ mod tests {
                 value: "http://example.com/a=b".to_string()
             }
         );
+    }
+
+    #[test]
+    fn parse_env_space_form_no_value_yields_empty_string() {
+        // `ENV KEY` with nothing after the key — space form with absent value.
+        // The parser must return Env { key: "KEY", value: "" } rather than an error,
+        // because Docker treats a bare ENV key as setting it to an empty string.
+        let result = parse_env("KEY", 1).expect("ENV KEY with no value should be valid");
+        assert_eq!(result, Instruction::Env {
+            key: "KEY".to_string(),
+            value: "".to_string(),
+        });
     }
 
     #[test]

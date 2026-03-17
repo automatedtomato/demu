@@ -193,7 +193,9 @@ mod tests {
         };
         let s = w.to_string();
         assert!(!s.is_empty());
-        assert!(s.contains("HEALTHCHECK"));
+        assert!(s.contains("HEALTHCHECK"), "must contain instruction name");
+        // Line number must appear so users can locate the instruction in their Dockerfile.
+        assert!(s.contains('5'), "must contain line number 5, got: {s}");
     }
 
     #[test]

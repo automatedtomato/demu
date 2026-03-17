@@ -313,6 +313,21 @@ mod tests {
     }
 
     #[test]
+    fn list_dir_does_not_match_string_prefix_sibling() {
+        // /app is a string prefix of /appdata, but NOT a path-component ancestor.
+        // strip_prefix uses component-level comparison, so /appdata/file must NOT
+        // appear in list_dir("/app"). A naive str::starts_with implementation
+        // would produce a false positive here.
+        let mut fs = VirtualFs::new();
+        fs.insert(PathBuf::from("/appdata/file.txt"), file_node(b""));
+        let children = fs.list_dir(Path::new("/app"));
+        assert!(
+            children.is_empty(),
+            "/appdata/file.txt must not appear as a child of /app"
+        );
+    }
+
+    #[test]
     fn list_dir_does_not_include_the_queried_directory_itself() {
         let mut fs = VirtualFs::new();
         fs.insert(PathBuf::from("/app"), dir_node());
