@@ -10,7 +10,7 @@ use demu::repl::Repl;
 
 #[test]
 fn model_preview_state_is_accessible() {
-    let _state = PreviewState;
+    let _state = PreviewState::default();
 }
 
 #[test]
