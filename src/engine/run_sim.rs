@@ -4,18 +4,17 @@
 // This module records the command in history and emits a warning so the
 // user understands the command was not executed.
 
-use crate::model::{state::{LayerSummary, PreviewState}, warning::Warning};
+use crate::model::{
+    state::{LayerSummary, PreviewState},
+    warning::Warning,
+};
 
 /// Handle a `RUN` instruction by recording it as unmodeled.
 ///
 /// Pushes a `Warning::UnmodeledRunCommand` to `state.warnings` and
 /// returns a `LayerSummary` with no filesystem or environment changes.
 /// The command text is preserved so it appears in `:history`.
-pub(crate) fn handle_run(
-    state: &mut PreviewState,
-    command: &str,
-    _line: usize,
-) -> LayerSummary {
+pub(crate) fn handle_run(state: &mut PreviewState, command: &str, _line: usize) -> LayerSummary {
     state.warnings.push(Warning::UnmodeledRunCommand {
         command: command.to_string(),
     });
@@ -42,10 +41,9 @@ mod tests {
         let mut state = PreviewState::default();
         handle_run(&mut state, "echo hello", 1);
 
-        let has_warning = state
-            .warnings
-            .iter()
-            .any(|w| matches!(w, Warning::UnmodeledRunCommand { command } if command == "echo hello"));
+        let has_warning = state.warnings.iter().any(
+            |w| matches!(w, Warning::UnmodeledRunCommand { command } if command == "echo hello"),
+        );
         assert!(has_warning, "expected UnmodeledRunCommand warning");
     }
 

@@ -139,7 +139,10 @@ fn test_unknown_instructions_emit_warnings() {
         .iter()
         .filter(|w| matches!(w, Warning::UnsupportedInstruction { .. }))
         .count();
-    assert_eq!(unsupported_count, 2, "expected 2 UnsupportedInstruction warnings (EXPOSE + HEALTHCHECK)");
+    assert_eq!(
+        unsupported_count, 2,
+        "expected 2 UnsupportedInstruction warnings (EXPOSE + HEALTHCHECK)"
+    );
 }
 
 // ── test: ENV accumulation ────────────────────────────────────────────────────

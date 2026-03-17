@@ -3,8 +3,8 @@
 //! The single public entry point is [`run`], which walks a `Vec<Instruction>`
 //! and returns a fully-populated [`PreviewState`].
 
-pub mod error;
 mod copy;
+pub mod error;
 mod run_sim;
 mod runner;
 

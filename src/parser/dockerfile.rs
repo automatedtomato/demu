@@ -321,10 +321,14 @@ mod tests {
         // that is the engine's responsibility when resolving against cwd.
         // Document this policy with an explicit test so future contributors
         // know the parser's contract.
-        let result = parse_workdir("app/subdir", 1).expect("relative WORKDIR must be accepted by parser");
-        assert_eq!(result, Instruction::Workdir {
-            path: std::path::PathBuf::from("app/subdir"),
-        });
+        let result =
+            parse_workdir("app/subdir", 1).expect("relative WORKDIR must be accepted by parser");
+        assert_eq!(
+            result,
+            Instruction::Workdir {
+                path: std::path::PathBuf::from("app/subdir"),
+            }
+        );
     }
 
     #[test]
@@ -430,10 +434,13 @@ mod tests {
         // The parser must return Env { key: "KEY", value: "" } rather than an error,
         // because Docker treats a bare ENV key as setting it to an empty string.
         let result = parse_env("KEY", 1).expect("ENV KEY with no value should be valid");
-        assert_eq!(result, Instruction::Env {
-            key: "KEY".to_string(),
-            value: "".to_string(),
-        });
+        assert_eq!(
+            result,
+            Instruction::Env {
+                key: "KEY".to_string(),
+                value: "".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -442,10 +449,13 @@ mod tests {
         // either — both branches must behave consistently.
         let result = parse_env("KEY  padded value  ", 1).expect("should parse");
         // key is trimmed (first token), value is everything after first whitespace
-        assert_eq!(result, Instruction::Env {
-            key: "KEY".to_string(),
-            value: " padded value  ".to_string(),
-        });
+        assert_eq!(
+            result,
+            Instruction::Env {
+                key: "KEY".to_string(),
+                value: " padded value  ".to_string(),
+            }
+        );
     }
 
     #[test]

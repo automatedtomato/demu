@@ -34,7 +34,10 @@ pub(crate) fn ensure_ancestors(
 ) {
     // Caller must supply an absolute path — relative paths would silently
     // produce wrong ancestor chains. This fires in debug/test builds.
-    debug_assert!(path.is_absolute(), "ensure_ancestors: path must be absolute, got {path:?}");
+    debug_assert!(
+        path.is_absolute(),
+        "ensure_ancestors: path must be absolute, got {path:?}"
+    );
 
     // Collect all ancestor paths, from root to the immediate parent.
     let mut ancestors: Vec<PathBuf> = path.ancestors().skip(1).map(Path::to_path_buf).collect();
@@ -107,7 +110,9 @@ pub(crate) fn handle_copy(
                     // Insert an empty placeholder file at the destination.
                     // If the source path has no filename component (e.g. `..`),
                     // skip the placeholder — we cannot determine a valid dest.
-                    let Some(final_dest) = resolve_file_dest(&resolved_dest, src_rel, has_trailing_slash) else {
+                    let Some(final_dest) =
+                        resolve_file_dest(&resolved_dest, src_rel, has_trailing_slash)
+                    else {
                         return Ok(LayerSummary {
                             instruction_type: "COPY".to_string(),
                             files_changed,
@@ -265,9 +270,7 @@ fn copy_dir_recursive(
                 path: entry_path.clone(),
                 source: std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "entry {entry_path:?} is not under src_root {src_root:?}"
-                    ),
+                    format!("entry {entry_path:?} is not under src_root {src_root:?}"),
                 ),
             })?;
         let dest_path = dest_root.join(rel);
@@ -470,7 +473,10 @@ mod tests {
             _ => panic!("expected File"),
         }
 
-        let c_node = state.fs.get(Path::new("/app/b/c.txt")).expect("/app/b/c.txt");
+        let c_node = state
+            .fs
+            .get(Path::new("/app/b/c.txt"))
+            .expect("/app/b/c.txt");
         match c_node {
             FsNode::File(f) => assert_eq!(f.content, b"c content"),
             _ => panic!("expected File"),
@@ -508,14 +514,8 @@ mod tests {
         let layer = run_host_copy(&mut state, "src", "/out", ctx.path());
 
         // files_changed must include both files (and possibly the directory entry).
-        let has_x = layer
-            .files_changed
-            .iter()
-            .any(|p| p.ends_with("x.txt"));
-        let has_y = layer
-            .files_changed
-            .iter()
-            .any(|p| p.ends_with("y.txt"));
+        let has_x = layer.files_changed.iter().any(|p| p.ends_with("x.txt"));
+        let has_y = layer.files_changed.iter().any(|p| p.ends_with("y.txt"));
         assert!(has_x, "x.txt must be in files_changed");
         assert!(has_y, "y.txt must be in files_changed");
     }
@@ -531,11 +531,13 @@ mod tests {
         let mut state = PreviewState::default();
         let source = CopySource::Stage("builder".to_string());
         let dest = PathBuf::from("/app");
-        let layer =
-            handle_copy(&mut state, &source, &dest, ctx.path(), 5).expect("handle_copy ok");
+        let layer = handle_copy(&mut state, &source, &dest, ctx.path(), 5).expect("handle_copy ok");
 
         // No files should be copied from a stage source.
-        assert!(layer.files_changed.is_empty(), "no files changed for Stage source");
+        assert!(
+            layer.files_changed.is_empty(),
+            "no files changed for Stage source"
+        );
 
         // No fs mutations should have occurred.
         assert!(

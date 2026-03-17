@@ -339,7 +339,9 @@ mod tests {
 
         let layer = &state.layers[0];
         assert!(
-            layer.env_changed.contains(&("KEY".to_string(), "value".to_string())),
+            layer
+                .env_changed
+                .contains(&("KEY".to_string(), "value".to_string())),
             "env_changed must contain (KEY, value)"
         );
     }
