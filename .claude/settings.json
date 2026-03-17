@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(head -5 /home/automatedtomato/github.com/automatedtomato/demu/.claude/agents/*.md)",
+      "Bash(head -5 /home/automatedtomato/github.com/automatedtomato/demu/.claude/commands/*.md)",
+      "Bash(grep -h \"^# \\\\|^## \\\\|^description:\" /home/automatedtomato/github.com/automatedtomato/demu/.claude/skills/*/SKILL*.md)",
+      "Bash(git init:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/suggest-compact.js\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/extract-patterns.js\""
+          }
+        ]
+      }
+    ]
+  }
+}
