@@ -4,16 +4,15 @@
 
 ## Current state
 
-Rust crate scaffold complete with full domain model (`src/model/`). The model layer defines all core types used throughout the engine:
-virtual filesystem (FileNode, DirNode, SymlinkNode), environment state, layer history, and provenance tracking.
-CLI parses arguments correctly. Parser, engine, and REPL remain as stubs.
+Rust crate scaffold complete with full domain model (`src/model/`) and Dockerfile parser (`src/parser/`). The model layer defines all core types; the parser converts Dockerfile/Compose files into typed instruction models.
+CLI parses arguments correctly. Engine, REPL, and explain remain as stubs.
 
 ## Module map
 
 | Module | File | Purpose | Status |
 |---|---|---|---|
 | `cli` | `src/cli.rs` | Parses `-f`/`--file` and `--stage` flags via clap | Stub — arg parsing works, no dispatch |
-| `parser` | `src/parser/mod.rs` | Turns Dockerfile/Compose files into typed instruction models | Stub — `ParseError` placeholder only |
+| `parser` | `src/parser/` (2 submodules) | Turns Dockerfile/Compose files into typed instruction models | Complete — hand-rolled line-based parser with 19 inline unit tests and 8 fixture-based integration tests |
 | `model` | `src/model/` (5 submodules) | Typed domain model: virtual filesystem, env, layers, provenance | Complete — all types defined with 89 tests |
 | `engine` | `src/engine/mod.rs` | Applies parsed instructions into preview state | Stub — `EngineError` placeholder only |
 | `repl` | `src/repl/mod.rs` | Interactive shell loop over preview state | Stub — `Repl` unit struct only |
@@ -34,6 +33,18 @@ The `src/model/` directory contains five typed submodules:
 | `state.rs` | `PreviewState`, `InstalledRegistry`, `HistoryEntry`, `LayerSummary` | Complete preview state: filesystem, environment, history, installed packages |
 
 All types are immutable, fully tested (89 tests), and documented with rustdoc.
+
+## Parser submodules (Issue #3)
+
+The `src/parser/` directory contains two typed submodules:
+
+| Submodule | Key Types | Purpose |
+|-----------|-----------|---------|
+| `error.rs` | `ParseError` enum | Parse errors with line numbers and descriptive messages via `thiserror` |
+| `dockerfile.rs` | `Instruction` enum (parser-facing) | Hand-rolled line-based Dockerfile parser; exports `parse_dockerfile(&str) -> Result<Vec<Instruction>, ParseError>` |
+
+The parser handles v0.1 subset: `FROM`, `RUN`, `COPY`, `ENV`, `WORKDIR`, `USER`, `EXPOSE`, `ENTRYPOINT`, `CMD`, plus comments and empty lines.
+Fully tested with 19 inline unit tests and 8 fixture-based integration tests using `.dockerfile` files.
 
 ## Data flow (planned)
 
@@ -69,11 +80,13 @@ Toolchain is pinned to stable via `rust-toolchain.toml`.
 
 ## Test coverage
 
-**89 tests pass; zero clippy warnings.**
+**119 tests pass; zero clippy warnings.**
 
 Key test groups:
 
 - `tests/scaffold.rs` — 8 integration tests for CLI, parser, engine, repl, explain
+- `tests/parser_fixtures.rs` — 8 fixture-based integration tests using `.dockerfile` files
+- `src/parser/dockerfile.rs` — 19 inline unit tests for instruction parsing
 - `src/model/fs.rs` — 40 unit tests for VirtualFs, filesystem operations, immutability
 - `src/model/state.rs` — 23 unit tests for PreviewState, InstalledRegistry, history tracking
 - `src/model/provenance.rs` — 10 unit tests for Provenance, ProvenanceSource
