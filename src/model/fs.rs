@@ -87,7 +87,18 @@ impl VirtualFs {
     }
 
     /// Insert a node at the given path, overwriting any existing node.
+    ///
+    /// # Panics (debug builds only)
+    ///
+    /// Panics in debug mode if `path` is not absolute. All paths stored in
+    /// `VirtualFs` must be absolute so that `list_dir`, `get`, and `contains`
+    /// produce correct results. In release builds the assertion is removed.
     pub fn insert(&mut self, path: PathBuf, node: FsNode) {
+        debug_assert!(
+            path.is_absolute(),
+            "VirtualFs::insert requires an absolute path, got: {}",
+            path.display()
+        );
         self.nodes.insert(path, node);
     }
 
@@ -146,6 +157,7 @@ fn is_direct_child(parent: &Path, candidate: &Path) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::model::provenance::{Provenance, ProvenanceSource};
@@ -298,6 +310,15 @@ mod tests {
         let fs = VirtualFs::new();
         let children = fs.list_dir(Path::new("/nonexistent"));
         assert!(children.is_empty());
+    }
+
+    #[test]
+    fn list_dir_does_not_include_the_queried_directory_itself() {
+        let mut fs = VirtualFs::new();
+        fs.insert(PathBuf::from("/app"), dir_node());
+        let children = fs.list_dir(Path::new("/app"));
+        let paths: Vec<PathBuf> = children.iter().map(|(p, _)| p.clone()).collect();
+        assert!(!paths.contains(&PathBuf::from("/app")));
     }
 
     #[test]

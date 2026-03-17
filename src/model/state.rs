@@ -33,27 +33,34 @@ impl InstalledRegistry {
     /// Record a package as installed under the given manager name.
     ///
     /// Recognised manager names: `"apt"`, `"pip"`, `"npm"`, `"go"`, `"apk"`.
-    /// Unrecognised manager names are silently ignored so the engine stays
-    /// non-panicking when it encounters an unknown install pattern.
-    pub fn record(&mut self, manager: &str, package: String) {
+    ///
+    /// Returns `true` if the manager was recognised and the package was recorded,
+    /// `false` if the manager is unknown. Callers should emit a `Warning` when
+    /// this returns `false` so the user sees that the install was not modeled.
+    pub fn record(&mut self, manager: &str, package: String) -> bool {
         match manager {
             "apt" => {
                 self.apt.insert(package);
+                true
             }
             "pip" => {
                 self.pip.insert(package);
+                true
             }
             "npm" => {
                 self.npm.insert(package);
+                true
             }
             "go" => {
                 self.go_pkgs.insert(package);
+                true
             }
             "apk" => {
                 self.apk.insert(package);
+                true
             }
-            // Unknown managers are silently ignored; engine stays non-panicking.
-            _ => {}
+            // Unknown manager — caller is responsible for emitting a Warning.
+            _ => false,
         }
     }
 
@@ -76,7 +83,7 @@ impl InstalledRegistry {
 ///
 /// The REPL `:history` command displays these entries to show the user what
 /// the engine processed and what observable effect it had.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HistoryEntry {
     /// Source line number (1-based) from the Dockerfile.
     pub line: usize,
@@ -89,7 +96,7 @@ pub struct HistoryEntry {
 /// A summary of what changed during one Dockerfile instruction ("layer").
 ///
 /// The REPL `:layers` command displays these to give a Docker-like layer view.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LayerSummary {
     /// The instruction type keyword (e.g. "COPY", "RUN", "ENV").
     pub instruction_type: String,
@@ -281,12 +288,20 @@ mod tests {
     }
 
     #[test]
-    fn record_unknown_manager_is_silently_ignored() {
+    fn record_unknown_manager_returns_false() {
         let mut reg = InstalledRegistry::default();
-        // Should not panic.
-        reg.record("brew", "htop".to_string());
-        // All lists remain empty.
+        // Returns false so the caller can emit a Warning.
+        let accepted = reg.record("brew", "htop".to_string());
+        assert!(!accepted);
+        // Package was not recorded anywhere.
         assert!(reg.list("brew").is_empty());
+    }
+
+    #[test]
+    fn record_known_manager_returns_true() {
+        let mut reg = InstalledRegistry::default();
+        let accepted = reg.record("apt", "curl".to_string());
+        assert!(accepted);
     }
 
     #[test]

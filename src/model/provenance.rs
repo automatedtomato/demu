@@ -28,13 +28,31 @@ pub enum ProvenanceSource {
     EnvSet { key: String, value: String },
 }
 
+/// The type of a Docker mount (`--mount=type=...`).
+///
+/// Using an enum rather than a free-form string prevents typos at call sites
+/// and allows exhaustive matching in the engine and `:explain` output.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MountKind {
+    /// `--mount=type=bind` — bind-mounts a host path into the build.
+    Bind,
+    /// `--mount=type=volume` — mounts a named volume.
+    Volume,
+    /// `--mount=type=tmpfs` — mounts an ephemeral tmpfs.
+    Tmpfs,
+    /// `--mount=type=cache` — mounts a persistent cache directory.
+    Cache,
+    /// `--mount=type=secret` — mounts a secret file.
+    Secret,
+}
+
 /// Metadata about a bind/volume mount that shadows a path in the virtual filesystem.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MountInfo {
     /// The source of the mount (e.g. host path, named volume, or stage reference).
     pub source: String,
-    /// The mount type: "bind", "volume", "tmpfs", "cache", or "secret".
-    pub mount_type: String,
+    /// The category of mount.
+    pub mount_type: MountKind,
 }
 
 /// Provenance record attached to every `FsNode`.
@@ -146,13 +164,26 @@ mod tests {
     // --- MountInfo construction ---
 
     #[test]
-    fn mount_info_stores_source_and_type() {
+    fn mount_info_stores_source_and_kind() {
         let mount = MountInfo {
             source: "/host/cache".to_string(),
-            mount_type: "bind".to_string(),
+            mount_type: MountKind::Bind,
         };
         assert_eq!(mount.source, "/host/cache");
-        assert_eq!(mount.mount_type, "bind");
+        assert_eq!(mount.mount_type, MountKind::Bind);
+    }
+
+    #[test]
+    fn all_mount_kinds_are_constructable() {
+        let kinds = [
+            MountKind::Bind,
+            MountKind::Volume,
+            MountKind::Tmpfs,
+            MountKind::Cache,
+            MountKind::Secret,
+        ];
+        // Each variant is distinct.
+        assert_ne!(kinds[0], kinds[1]);
     }
 
     // --- Provenance::new ---
