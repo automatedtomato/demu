@@ -1,11 +1,11 @@
 # demu Codemap Index
 
-**Last Updated:** 2026-03-17
+**Last Updated:** 2026-03-17 (after Issue #4 completion)
 
 ## Current state
 
-Rust crate scaffold complete with full domain model (`src/model/`) and Dockerfile parser (`src/parser/`). The model layer defines all core types; the parser converts Dockerfile/Compose files into typed instruction models.
-CLI parses arguments correctly. Engine, REPL, and explain remain as stubs.
+Rust crate scaffold complete with full domain model (`src/model/`), Dockerfile parser (`src/parser/`), and engine (`src/engine/`). The model layer defines all core types; the parser converts Dockerfile/Compose files into typed instruction models; the engine applies those instructions to build a preview state.
+CLI parses arguments correctly. REPL and explain remain as stubs.
 
 ## Module map
 
@@ -14,7 +14,7 @@ CLI parses arguments correctly. Engine, REPL, and explain remain as stubs.
 | `cli` | `src/cli.rs` | Parses `-f`/`--file` and `--stage` flags via clap | Stub — arg parsing works, no dispatch |
 | `parser` | `src/parser/` (2 submodules) | Turns Dockerfile/Compose files into typed instruction models | Complete — hand-rolled line-based parser with 19 inline unit tests and 8 fixture-based integration tests |
 | `model` | `src/model/` (5 submodules) | Typed domain model: virtual filesystem, env, layers, provenance | Complete — all types defined with 89 tests |
-| `engine` | `src/engine/mod.rs` | Applies parsed instructions into preview state | Stub — `EngineError` placeholder only |
+| `engine` | `src/engine/` (4 submodules) | Applies parsed instructions into preview state; handles COPY, RUN, and other operations | Complete — handles COPY with recursive dirs, RUN simulation with warnings; 6 integration tests |
 | `repl` | `src/repl/mod.rs` | Interactive shell loop over preview state | Stub — `Repl` unit struct only |
 | `explain` | `src/explain/mod.rs` | Answers provenance questions about files and instructions | Stub — `Explain` unit struct only |
 | entrypoint | `src/main.rs` | Binary entrypoint; calls `Cli::parse()` and exits | Stub — prints "preview not yet implemented" |
@@ -45,6 +45,19 @@ The `src/parser/` directory contains two typed submodules:
 
 The parser handles v0.1 subset: `FROM`, `RUN`, `COPY`, `ENV`, `WORKDIR`, `USER`, `EXPOSE`, `ENTRYPOINT`, `CMD`, plus comments and empty lines.
 Fully tested with 19 inline unit tests and 8 fixture-based integration tests using `.dockerfile` files.
+
+## Engine submodules (Issue #4)
+
+The `src/engine/` directory contains four typed submodules:
+
+| Submodule | Key Types | Purpose |
+|-----------|-----------|---------|
+| `error.rs` | `EngineError` enum | Engine errors (I/O, missing sources, invalid state) via `thiserror` |
+| `runner.rs` | `pub fn run(Vec<Instruction>, &Path) -> Result<PreviewState, EngineError>` | Main orchestrator: applies instructions sequentially, maintains immutable preview state |
+| `copy.rs` | `fn apply_copy(...)` | Handles COPY instruction: supports recursive directories, issues warnings for missing sources |
+| `run_sim.rs` | `fn apply_run(...)` | Handles RUN instruction: records command and warning (simulates without host execution) |
+
+The engine applies parsed instructions to build a preview state. COPY recursively copies files and directories with provenance tracking. RUN records commands without executing them on the host. Fully tested with 6 integration tests using real fixture Dockerfiles and context directories.
 
 ## Data flow (planned)
 
@@ -80,17 +93,19 @@ Toolchain is pinned to stable via `rust-toolchain.toml`.
 
 ## Test coverage
 
-**119 tests pass; zero clippy warnings.**
+**159 tests pass; zero clippy warnings.**
 
 Key test groups:
 
 - `tests/scaffold.rs` — 8 integration tests for CLI, parser, engine, repl, explain
 - `tests/parser_fixtures.rs` — 8 fixture-based integration tests using `.dockerfile` files
+- `tests/engine_integration.rs` — 6 fixture-based integration tests for COPY, RUN, and state mutation
 - `src/parser/dockerfile.rs` — 19 inline unit tests for instruction parsing
 - `src/model/fs.rs` — 40 unit tests for VirtualFs, filesystem operations, immutability
 - `src/model/state.rs` — 23 unit tests for PreviewState, InstalledRegistry, history tracking
 - `src/model/provenance.rs` — 10 unit tests for Provenance, ProvenanceSource
 - `src/model/instruction.rs` — 8 unit tests for Instruction, CopySource enums
+- Engine unit tests — embedded in `src/engine/*.rs` modules, covering error handling and instruction application
 
 ## Key files
 

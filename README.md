@@ -52,23 +52,24 @@ It prefers **fast, safe previews** over perfect fidelity.
 
 ## Status
 
-**Current: scaffold complete — v0.1.0 in progress.**
+**Current: core engine complete — v0.1.0 in progress (after PR #13, Issue #4).**
 
-The Rust crate exists with typed module stubs and a working CLI skeleton. No real preview functionality is implemented yet.
+The Rust crate has a complete Dockerfile parser, typed domain model, and fully working preview engine. REPL and explain modules remain as stubs.
 
 What works today:
 
 - `demu -f <path>` and `demu -f <path> --stage <name>` parse correctly
-- All five modules (`parser`, `model`, `engine`, `repl`, `explain`) exist as stubs
-- 8 integration tests pass, covering module structure and CLI argument parsing
-- `cargo build` and `cargo test` succeed
+- Dockerfile parsing: `FROM`, `RUN`, `COPY`, `ENV`, `WORKDIR`, plus other instructions
+- Virtual filesystem with immutable tree updates and provenance tracking
+- Engine applies all parsed instructions: COPY reads real files from build context, RUN records commands
+- 159 tests pass (89 model, 19 parser, 6 engine integration, 8 CLI scaffold, 8 parser fixtures, plus embedded unit tests)
+- `cargo build` and `cargo test` succeed with zero clippy warnings
 
 What does not work yet:
 
-- Dockerfile parsing
-- Virtual filesystem
-- REPL loop
-- Any preview output (binary prints `"demu: preview not yet implemented"`)
+- REPL loop and interactive shell
+- `:explain` command (provenance query)
+- Any runtime output (binary prints `"demu: preview not yet implemented"`)
 
 The first target is a Dockerfile-focused MVP. Compose support comes after.
 
