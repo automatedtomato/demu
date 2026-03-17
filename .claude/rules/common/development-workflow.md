@@ -6,6 +6,29 @@
 
 The Feature Implementation Workflow describes the development pipeline: research, planning, TDD, code review, and then committing to git.
 
+## Task tracking
+
+Always maintain `tasks/todo.md` as the persistent record of work status across sessions.
+
+- **At session start:** read `tasks/todo.md` to understand what is in progress and what is next.
+- **During work:** update `tasks/todo.md` whenever a task starts, completes, or is blocked.
+- **At session end:** ensure `tasks/todo.md` reflects the current state before stopping.
+
+`tasks/todo.md` is the source of truth for ongoing work. It outlasts any single conversation and should be kept current even when the in-session TodoWrite tool is also in use.
+
+Suggested format:
+
+```markdown
+## In progress
+- [ ] #1 Cargo workspace scaffold — setting up module stubs
+
+## Up next
+- [ ] #2 Domain model types
+
+## Done
+- [x] milestone planning, design decisions (tasks/decisions/)
+```
+
 ## Feature Implementation Workflow
 
 0. **Research & Reuse** _(mandatory before any new implementation)_
