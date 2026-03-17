@@ -14,7 +14,11 @@ use demu::parser::parse_dockerfile;
 use std::path::Path;
 
 /// Shared build context for all integration tests.
-const CONTEXT_DIR: &str = "tests/fixtures/engine/context";
+///
+/// Using `CARGO_MANIFEST_DIR` ensures the path is correct regardless of
+/// the working directory from which `cargo test` is invoked (e.g. in CI
+/// the cwd may differ from the workspace root).
+const CONTEXT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/engine/context");
 
 // ── test: minimal full pipeline ───────────────────────────────────────────────
 

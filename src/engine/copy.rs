@@ -32,6 +32,10 @@ pub(crate) fn ensure_ancestors(
     path: &Path,
     provenance_source: ProvenanceSource,
 ) {
+    // Caller must supply an absolute path — relative paths would silently
+    // produce wrong ancestor chains. This fires in debug/test builds.
+    debug_assert!(path.is_absolute(), "ensure_ancestors: path must be absolute, got {path:?}");
+
     // Collect all ancestor paths, from root to the immediate parent.
     let mut ancestors: Vec<PathBuf> = path.ancestors().skip(1).map(Path::to_path_buf).collect();
     // ancestors() yields longest-first; we want to insert root-first.
@@ -73,7 +77,7 @@ pub(crate) fn handle_copy(
     source: &CopySource,
     dest: &Path,
     context_dir: &Path,
-    _line: usize,
+    line: usize,
 ) -> Result<LayerSummary, EngineError> {
     // Resolve the destination path: relative dests are joined to the current cwd.
     let dest_str = dest.to_string_lossy();
@@ -101,7 +105,15 @@ pub(crate) fn handle_copy(
                         path: host_path.clone(),
                     });
                     // Insert an empty placeholder file at the destination.
-                    let final_dest = resolve_file_dest(&resolved_dest, src_rel, has_trailing_slash);
+                    // If the source path has no filename component (e.g. `..`),
+                    // skip the placeholder — we cannot determine a valid dest.
+                    let Some(final_dest) = resolve_file_dest(&resolved_dest, src_rel, has_trailing_slash) else {
+                        return Ok(LayerSummary {
+                            instruction_type: "COPY".to_string(),
+                            files_changed,
+                            env_changed: vec![],
+                        });
+                    };
                     let provenance = ProvenanceSource::CopyFromHost {
                         host_path: host_path.clone(),
                     };
@@ -131,8 +143,17 @@ pub(crate) fn handle_copy(
 
             if meta.is_file() {
                 // Single-file copy: resolve the final destination path.
-                let final_dest =
-                    resolve_file_dest(&resolved_dest, src_rel, has_trailing_slash);
+                // If the source path has no filename component, skip silently
+                // rather than writing to a bogus location.
+                let Some(final_dest) =
+                    resolve_file_dest(&resolved_dest, src_rel, has_trailing_slash)
+                else {
+                    return Ok(LayerSummary {
+                        instruction_type: "COPY".to_string(),
+                        files_changed,
+                        env_changed: vec![],
+                    });
+                };
                 let provenance = ProvenanceSource::CopyFromHost {
                     host_path: host_path.clone(),
                 };
@@ -152,6 +173,12 @@ pub(crate) fn handle_copy(
                 files_changed.push(final_dest);
             } else if meta.is_dir() {
                 // Directory copy: walk the tree and insert each file.
+                // TODO: `has_trailing_slash` is not used for directory sources.
+                // Docker's actual behavior: `COPY src/ /dest/` and `COPY src /dest`
+                // both copy the contents of src into dest. Modeling this distinction
+                // would require detecting whether the dest already exists; deferred
+                // to a future iteration (see VirtualFs::contains + trailing-slash
+                // handling in resolve_file_dest for the single-file analogue).
                 copy_dir_recursive(
                     &host_path,
                     &host_path,
@@ -162,8 +189,13 @@ pub(crate) fn handle_copy(
             }
         }
         // Stage-to-stage copies are not yet modeled in v0.1.
-        CopySource::Stage(_stage) => {
-            // Emit no warning here — the runner handles stage COPY separately.
+        CopySource::Stage(stage) => {
+            // Surface an UnsupportedInstruction warning so the user knows
+            // this COPY was skipped rather than silently producing an empty fs.
+            state.warnings.push(Warning::UnsupportedInstruction {
+                instruction: format!("COPY --from={stage}"),
+                line,
+            });
         }
     }
 
@@ -178,15 +210,18 @@ pub(crate) fn handle_copy(
 ///
 /// If the destination has a trailing slash (was specified as a directory),
 /// the source filename is appended. Otherwise the destination is used as-is.
-fn resolve_file_dest(dest: &Path, src_rel: &Path, had_trailing_slash: bool) -> PathBuf {
+///
+/// Returns `None` when the source path has no file name component (e.g. `..`
+/// or an empty path), which the caller must treat as an error or warning.
+fn resolve_file_dest(dest: &Path, src_rel: &Path, had_trailing_slash: bool) -> Option<PathBuf> {
     if had_trailing_slash {
         // Dest is explicitly a directory: append just the filename component.
-        let filename = src_rel
-            .file_name()
-            .unwrap_or(src_rel.as_os_str());
-        dest.join(filename)
+        // `file_name()` returns None for paths like `..` or `/`; bail out
+        // rather than substituting a bogus OS string.
+        let filename = src_rel.file_name()?;
+        Some(dest.join(filename))
     } else {
-        dest.to_path_buf()
+        Some(dest.to_path_buf())
     }
 }
 
@@ -220,9 +255,21 @@ fn copy_dir_recursive(
         })?;
 
         // Compute the path suffix relative to the source root directory.
+        // strip_prefix must succeed here because `entry_path` is always a
+        // descendant of `src_root` (produced by read_dir walking src_root).
+        // If it somehow fails, propagate an Io error rather than silently
+        // substituting the host path into the virtual filesystem.
         let rel = entry_path
             .strip_prefix(src_root)
-            .unwrap_or(&entry_path);
+            .map_err(|_| EngineError::Io {
+                path: entry_path.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "entry {entry_path:?} is not under src_root {src_root:?}"
+                    ),
+                ),
+            })?;
         let dest_path = dest_root.join(rel);
 
         let provenance = ProvenanceSource::CopyFromHost {
@@ -471,5 +518,77 @@ mod tests {
             .any(|p| p.ends_with("y.txt"));
         assert!(has_x, "x.txt must be in files_changed");
         assert!(has_y, "y.txt must be in files_changed");
+    }
+
+    // ── test: Stage source emits UnsupportedInstruction warning ──────────
+
+    #[test]
+    fn copy_stage_source_emits_unsupported_instruction_warning() {
+        // CopySource::Stage is currently unreachable from the parser (the parser
+        // downgrades COPY --from= to Unknown), but handle_copy must still behave
+        // correctly when called directly (e.g. from future multi-stage support).
+        let ctx = tempfile::tempdir().expect("tempdir");
+        let mut state = PreviewState::default();
+        let source = CopySource::Stage("builder".to_string());
+        let dest = PathBuf::from("/app");
+        let layer =
+            handle_copy(&mut state, &source, &dest, ctx.path(), 5).expect("handle_copy ok");
+
+        // No files should be copied from a stage source.
+        assert!(layer.files_changed.is_empty(), "no files changed for Stage source");
+
+        // No fs mutations should have occurred.
+        assert!(
+            state.fs.get(Path::new("/app")).is_none(),
+            "fs must be empty after Stage COPY"
+        );
+
+        // An UnsupportedInstruction warning must be emitted.
+        let warning = state
+            .warnings
+            .iter()
+            .find(|w| matches!(w, Warning::UnsupportedInstruction { .. }));
+        assert!(warning.is_some(), "expected UnsupportedInstruction warning");
+        match warning.unwrap() {
+            Warning::UnsupportedInstruction { instruction, line } => {
+                assert!(
+                    instruction.contains("builder"),
+                    "warning instruction must mention stage name, got: {instruction}"
+                );
+                assert_eq!(*line, 5, "warning line must match the supplied line");
+            }
+            _ => panic!("unexpected warning variant"),
+        }
+    }
+
+    // ── test: resolve_file_dest with no-filename source returns None ─────
+
+    #[test]
+    fn resolve_file_dest_returns_none_for_src_with_no_filename() {
+        // `..` and `.` both have file_name() == None in Rust's Path API.
+        // resolve_file_dest must return None rather than substituting the raw
+        // OsStr, which was the original bug this fix addresses.
+        let dest = PathBuf::from("/app");
+        assert_eq!(
+            resolve_file_dest(&dest, Path::new(".."), true),
+            None,
+            "trailing-slash dest with src `..` must yield None"
+        );
+        assert_eq!(
+            resolve_file_dest(&dest, Path::new("."), true),
+            None,
+            "trailing-slash dest with src `.` must yield None"
+        );
+    }
+
+    #[test]
+    fn resolve_file_dest_no_trailing_slash_always_returns_dest() {
+        // Without a trailing slash the dest is used as-is regardless of src_rel.
+        let dest = PathBuf::from("/app/file.txt");
+        assert_eq!(
+            resolve_file_dest(&dest, Path::new(".."), false),
+            Some(PathBuf::from("/app/file.txt")),
+            "no trailing slash must always return dest"
+        );
     }
 }
