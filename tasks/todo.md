@@ -5,11 +5,9 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 
 ## In progress
 
-_nothing_
+- [ ] [#2](https://github.com/automatedtomato/demu/issues/2) feat: domain model types — implementation complete, pending PR
 
 ## Up next
-
-- [ ] [#2](https://github.com/automatedtomato/demu/issues/2) feat: domain model types
 - [ ] [#3](https://github.com/automatedtomato/demu/issues/3) feat: Dockerfile parser (v0.1 subset)
 - [ ] [#4](https://github.com/automatedtomato/demu/issues/4) feat: engine — apply instructions to PreviewState
 - [ ] [#5](https://github.com/automatedtomato/demu/issues/5) feat: REPL — standard shell commands
