@@ -5,9 +5,9 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 
 ## In progress
 
-## Up next
-
 - [ ] [#4](https://github.com/automatedtomato/demu/issues/4) feat: engine — apply instructions to PreviewState
+
+## Up next
 - [ ] [#5](https://github.com/automatedtomato/demu/issues/5) feat: REPL — standard shell commands
 - [ ] [#6](https://github.com/automatedtomato/demu/issues/6) feat: REPL — custom inspection commands
 - [ ] [#7](https://github.com/automatedtomato/demu/issues/7) feat: CLI entrypoint
