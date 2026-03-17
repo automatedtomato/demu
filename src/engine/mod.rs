@@ -5,3 +5,6 @@
 #[derive(Debug, thiserror::Error)]
 #[error("engine error (placeholder — variants added in #4)")]
 pub struct EngineError;
+
+#[cfg(test)]
+mod tests {}

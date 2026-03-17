@@ -3,3 +3,6 @@
 //! Typed domain model for virtual filesystem state, environment, layers, and provenance.
 
 pub struct PreviewState;
+
+#[cfg(test)]
+mod tests {}

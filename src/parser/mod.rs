@@ -5,3 +5,6 @@
 #[derive(Debug, thiserror::Error)]
 #[error("parse error (placeholder — variants added in #3)")]
 pub struct ParseError;
+
+#[cfg(test)]
+mod tests {}
