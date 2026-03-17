@@ -47,14 +47,24 @@ pub fn parse_dockerfile(input: &str) -> Result<Vec<Instruction>, ParseError> {
             "workdir" => parse_workdir(rest, line_num)?,
             "copy" => {
                 // COPY with a flag (e.g. --from=builder) is unsupported in v0.1.
-                // Downgrade to Unknown instead of erroring so we can still show
-                // the line in history with a "simulated / unsupported" note.
+                // Downgrade to Unknown so the line is preserved in history.
                 if rest.trim_start().starts_with("--") {
                     Instruction::Unknown {
                         raw: trimmed.to_string(),
                     }
                 } else {
-                    parse_copy(rest, line_num)?
+                    // Multi-source COPY (`COPY src1 src2 dest`) is also not
+                    // supported in v0.1. Silently truncating to the first two
+                    // tokens would store the wrong dest, which is worse than
+                    // surfacing the limitation. Downgrade to Unknown instead.
+                    let token_count = rest.split_whitespace().count();
+                    if token_count > 2 {
+                        Instruction::Unknown {
+                            raw: trimmed.to_string(),
+                        }
+                    } else {
+                        parse_copy(rest, line_num)?
+                    }
                 }
             }
             "env" => parse_env(rest, line_num)?,
@@ -118,6 +128,19 @@ fn parse_from(rest: &str, line: usize) -> Result<Instruction, ParseError> {
         None
     };
 
+    // Any tokens beyond `image [AS alias]` are unexpected.
+    // `FROM image` → max 1 token. `FROM image AS alias` → max 3 tokens.
+    let expected_max = if alias.is_some() { 3 } else { 1 };
+    if tokens.len() > expected_max {
+        return Err(ParseError::InvalidInstruction {
+            line,
+            message: format!(
+                "FROM has unexpected extra tokens: {}",
+                tokens[expected_max..].join(" ")
+            ),
+        });
+    }
+
     Ok(Instruction::From { image, alias })
 }
 
@@ -175,10 +198,13 @@ fn parse_env(rest: &str, line: usize) -> Result<Instruction, ParseError> {
         let value = rest[eq_pos + 1..].to_string();
         (key, value)
     } else {
-        // `KEY VALUE` form — split on first whitespace.
+        // `KEY VALUE` form — split on first whitespace. The value is
+        // everything after the first whitespace run; whitespace is NOT
+        // trimmed from the value side so `ENV PATH  /usr/bin ` stores
+        // the value exactly as written (consistent with the `=` form).
         let mut parts = rest.splitn(2, |c: char| c.is_ascii_whitespace());
         let key = parts.next().unwrap_or("").trim().to_string();
-        let value = parts.next().unwrap_or("").trim().to_string();
+        let value = parts.next().unwrap_or("").to_string();
         (key, value)
     };
 
@@ -317,6 +343,36 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("line 2"));
     }
 
+    // --- parse_from extra tokens ---
+
+    #[test]
+    fn parse_from_extra_token_after_image_returns_error() {
+        // `FROM ubuntu extra` — no AS keyword, extra token after image.
+        let result = parse_from("ubuntu extra", 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("line 1"));
+    }
+
+    #[test]
+    fn parse_from_extra_token_after_alias_returns_error() {
+        // `FROM ubuntu:22.04 AS builder extratoken` — extra token after alias.
+        let result = parse_from("ubuntu:22.04 AS builder extratoken", 2);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("line 2"));
+    }
+
+    // --- parse_copy multi-source ---
+
+    #[test]
+    fn copy_multi_source_becomes_unknown() {
+        // `COPY src1 src2 dest` — multi-source not supported in v0.1.
+        // Must become Unknown rather than silently using wrong dest.
+        let instructions =
+            parse_dockerfile("COPY req.txt pyproject.toml /app/").expect("must not error");
+        assert_eq!(instructions.len(), 1);
+        assert!(matches!(instructions[0], Instruction::Unknown { .. }));
+    }
+
     // --- parse_env ---
 
     #[test]
@@ -354,6 +410,18 @@ mod tests {
                 value: "http://example.com/a=b".to_string()
             }
         );
+    }
+
+    #[test]
+    fn parse_env_space_form_preserves_value_whitespace() {
+        // The `=` form does not trim the value, so the space form should not
+        // either — both branches must behave consistently.
+        let result = parse_env("KEY  padded value  ", 1).expect("should parse");
+        // key is trimmed (first token), value is everything after first whitespace
+        assert_eq!(result, Instruction::Env {
+            key: "KEY".to_string(),
+            value: " padded value  ".to_string(),
+        });
     }
 
     #[test]
