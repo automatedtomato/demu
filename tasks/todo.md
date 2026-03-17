@@ -4,9 +4,9 @@ Milestone: [Release v0.1.0](https://github.com/automatedtomato/demu/milestone/1)
 Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 
 ## In progress
+- [ ] [#3](https://github.com/automatedtomato/demu/issues/3) feat: Dockerfile parser (v0.1 subset)
 
 ## Up next
-- [ ] [#3](https://github.com/automatedtomato/demu/issues/3) feat: Dockerfile parser (v0.1 subset)
 - [ ] [#4](https://github.com/automatedtomato/demu/issues/4) feat: engine — apply instructions to PreviewState
 - [ ] [#5](https://github.com/automatedtomato/demu/issues/5) feat: REPL — standard shell commands
 - [ ] [#6](https://github.com/automatedtomato/demu/issues/6) feat: REPL — custom inspection commands
