@@ -5,7 +5,7 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 
 ## In progress
 
-- [ ] [#1](https://github.com/automatedtomato/demu/issues/1) PR open → [#10](https://github.com/automatedtomato/demu/pull/10) — awaiting review/merge
+_nothing_
 
 ## Up next
 
@@ -22,3 +22,4 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 - [x] Milestone planning and GitHub setup
 - [x] Design decisions: `tasks/decisions/001~003`
 - [x] Private repo + `main` / `develop` branches
+- [x] [#1](https://github.com/automatedtomato/demu/issues/1) Cargo scaffold — merged [#10](https://github.com/automatedtomato/demu/pull/10)
