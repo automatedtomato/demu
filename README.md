@@ -20,7 +20,7 @@ When you are editing a `Dockerfile` or `compose.yaml`, you often just want to an
 
 ```bash
 demu -f Dockerfile
-demu --compose -f compose.yaml --service api
+demu -f Dockerfile --stage builder
 ```
 
 Inside the preview shell:
@@ -52,18 +52,44 @@ It prefers **fast, safe previews** over perfect fidelity.
 
 ## Status
 
-This project is in active development.
+**Current: scaffold complete — v0.1.0 in progress.**
 
-The first target is a Dockerfile-focused MVP with:
+The Rust crate exists with typed module stubs and a working CLI skeleton. No real preview functionality is implemented yet.
 
-- preview shell via `demu -f Dockerfile`
-- virtual filesystem inspection
-- support for `FROM`, `WORKDIR`, `COPY`, `ENV`
-- partial `RUN` simulation for filesystem changes
-- simulated install tracking for commands like `apt install` and `pip install`
-- helper commands like `:layers`, `:history`, `:installed`, and `:explain`
+What works today:
 
-Compose support comes after the Dockerfile MVP.
+- `demu -f <path>` and `demu -f <path> --stage <name>` parse correctly
+- All five modules (`parser`, `model`, `engine`, `repl`, `explain`) exist as stubs
+- 8 integration tests pass, covering module structure and CLI argument parsing
+- `cargo build` and `cargo test` succeed
+
+What does not work yet:
+
+- Dockerfile parsing
+- Virtual filesystem
+- REPL loop
+- Any preview output (binary prints `"demu: preview not yet implemented"`)
+
+The first target is a Dockerfile-focused MVP. Compose support comes after.
+
+## Building and testing
+
+Requires Rust stable (managed via `rust-toolchain.toml`).
+
+```bash
+cargo build
+cargo test
+```
+
+## Dev environment
+
+A containerized dev environment is provided via Docker Compose:
+
+```bash
+docker compose -f docker-compose.dev.yml run --rm dev bash
+```
+
+Inside the container, `cargo build` and `cargo test` work without a local Rust install.
 
 ## Docs
 
@@ -75,3 +101,4 @@ Compose support comes after the Dockerfile MVP.
 - [Compose Plan](./docs/06-compose-plan.md)
 - [Roadmap](./docs/07-roadmap.md)
 - [Test Strategy](./docs/08-test-strategy.md)
+- [Codemap Index](./docs/CODEMAPS/INDEX.md)

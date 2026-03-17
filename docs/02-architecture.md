@@ -1,3 +1,5 @@
+> **Note (2026-03-17):** The CLI examples below (`demu exec`, `demu --compose`, `--service`) reflect the planned design and are not yet implemented. As of the v0.1.0 scaffold, `src/cli.rs` only accepts `-f/--file` and `--stage`. These flags will be added in later milestones.
+
 # Architecture
 
 ## System overview
