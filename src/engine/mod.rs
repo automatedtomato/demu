@@ -1,10 +1,12 @@
-#![allow(dead_code)]
+//! Applies parsed Dockerfile instructions into preview state.
+//!
+//! The single public entry point is [`run`], which walks a `Vec<Instruction>`
+//! and returns a fully-populated [`PreviewState`].
 
-//! Applies parsed Dockerfile and Compose instructions into preview state.
+pub mod error;
+mod copy;
+mod run_sim;
+mod runner;
 
-#[derive(Debug, thiserror::Error)]
-#[error("engine error (placeholder — variants added in #4)")]
-pub struct EngineError;
-
-#[cfg(test)]
-mod tests {}
+pub use error::EngineError;
+pub use runner::run;

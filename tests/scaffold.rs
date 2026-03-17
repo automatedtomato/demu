@@ -28,7 +28,13 @@ fn parser_parse_error_is_constructible_and_displayable() {
 
 #[test]
 fn engine_engine_error_is_constructible_and_displayable() {
-    let e = EngineError;
+    // EngineError is now an enum; construct a representative variant via its
+    // public Io variant using a fabricated I/O error.
+    let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "test");
+    let e = EngineError::Io {
+        path: std::path::PathBuf::from("/test/path"),
+        source: io_err,
+    };
     let msg = format!("{e}");
     assert!(
         !msg.is_empty(),
