@@ -1,10 +1,7 @@
-#![allow(dead_code)]
-
 //! Turns Dockerfile and Compose files into typed instruction models.
 
-#[derive(Debug, thiserror::Error)]
-#[error("parse error (placeholder — variants added in #3)")]
-pub struct ParseError;
+pub mod dockerfile;
+pub mod error;
 
-#[cfg(test)]
-mod tests {}
+pub use dockerfile::parse_dockerfile;
+pub use error::ParseError;

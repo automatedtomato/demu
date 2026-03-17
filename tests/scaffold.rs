@@ -15,7 +15,10 @@ fn model_preview_state_is_accessible() {
 
 #[test]
 fn parser_parse_error_is_constructible_and_displayable() {
-    let e = ParseError;
+    let e = ParseError::InvalidInstruction {
+        line: 1,
+        message: "test error".to_string(),
+    };
     let msg = format!("{e}");
     assert!(
         !msg.is_empty(),

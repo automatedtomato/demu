@@ -320,9 +320,11 @@ mod tests {
         clone.cwd = PathBuf::from("/app");
         assert_eq!(state.cwd, PathBuf::from("/"));
 
-        state.warnings.push(crate::model::warning::Warning::EmptyBaseImage {
-            image: "scratch".to_string(),
-        });
+        state
+            .warnings
+            .push(crate::model::warning::Warning::EmptyBaseImage {
+                image: "scratch".to_string(),
+            });
         assert!(clone.warnings.is_empty());
     }
 

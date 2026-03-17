@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn all_mount_kinds_are_constructable() {
+    fn all_mount_kinds_are_mutually_distinct() {
         let kinds = [
             MountKind::Bind,
             MountKind::Volume,
@@ -182,8 +182,17 @@ mod tests {
             MountKind::Cache,
             MountKind::Secret,
         ];
-        // Each variant is distinct.
-        assert_ne!(kinds[0], kinds[1]);
+        // Every pair must be distinct — catches any accidental mapping of
+        // multiple variants to the same underlying discriminant.
+        for i in 0..kinds.len() {
+            for j in 0..kinds.len() {
+                if i == j {
+                    assert_eq!(kinds[i], kinds[j], "variant {i} should equal itself");
+                } else {
+                    assert_ne!(kinds[i], kinds[j], "variants {i} and {j} must be distinct");
+                }
+            }
+        }
     }
 
     // --- Provenance::new ---
