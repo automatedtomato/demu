@@ -4,9 +4,9 @@
 
 ## Current state
 
-Rust crate scaffold only. All five modules exist as stubs with placeholder types.
-The CLI (`demu -f <path> [--stage <name>]`) parses arguments correctly but produces
-no preview output. No Dockerfile parsing, virtual filesystem, or REPL is implemented.
+Rust crate scaffold complete with full domain model (`src/model/`). The model layer defines all core types used throughout the engine:
+virtual filesystem (FileNode, DirNode, SymlinkNode), environment state, layer history, and provenance tracking.
+CLI parses arguments correctly. Parser, engine, and REPL remain as stubs.
 
 ## Module map
 
@@ -14,12 +14,26 @@ no preview output. No Dockerfile parsing, virtual filesystem, or REPL is impleme
 |---|---|---|---|
 | `cli` | `src/cli.rs` | Parses `-f`/`--file` and `--stage` flags via clap | Stub — arg parsing works, no dispatch |
 | `parser` | `src/parser/mod.rs` | Turns Dockerfile/Compose files into typed instruction models | Stub — `ParseError` placeholder only |
-| `model` | `src/model/mod.rs` | Typed domain model: virtual filesystem, env, layers, provenance | Stub — `PreviewState` unit struct only |
+| `model` | `src/model/` (5 submodules) | Typed domain model: virtual filesystem, env, layers, provenance | Complete — all types defined with 89 tests |
 | `engine` | `src/engine/mod.rs` | Applies parsed instructions into preview state | Stub — `EngineError` placeholder only |
 | `repl` | `src/repl/mod.rs` | Interactive shell loop over preview state | Stub — `Repl` unit struct only |
 | `explain` | `src/explain/mod.rs` | Answers provenance questions about files and instructions | Stub — `Explain` unit struct only |
 | entrypoint | `src/main.rs` | Binary entrypoint; calls `Cli::parse()` and exits | Stub — prints "preview not yet implemented" |
 | lib root | `src/lib.rs` | Re-exports `Cli` and declares all five modules | Complete for current scope |
+
+## Model submodules (Issue #2)
+
+The `src/model/` directory contains five typed submodules:
+
+| Submodule | Types | Purpose |
+|-----------|-------|---------|
+| `provenance.rs` | `Provenance`, `ProvenanceSource`, `MountInfo` | Tracks where files came from (COPY, RUN, mount, base image) |
+| `warning.rs` | `Warning` enum | Non-fatal diagnostics (unsupported commands, skipped behaviors) |
+| `instruction.rs` | `Instruction` enum, `CopySource` enum | Parsed Dockerfile instructions (FROM, RUN, COPY, ENV, etc.) |
+| `fs.rs` | `FileNode`, `DirNode`, `SymlinkNode`, `FsNode`, `VirtualFs` | Virtual filesystem representation with immutable tree updates |
+| `state.rs` | `PreviewState`, `InstalledRegistry`, `HistoryEntry`, `LayerSummary` | Complete preview state: filesystem, environment, history, installed packages |
+
+All types are immutable, fully tested (89 tests), and documented with rustdoc.
 
 ## Data flow (planned)
 
@@ -55,16 +69,15 @@ Toolchain is pinned to stable via `rust-toolchain.toml`.
 
 ## Test coverage
 
-`tests/scaffold.rs` — 8 integration tests:
+**89 tests pass; zero clippy warnings.**
 
-- `model_preview_state_is_accessible`
-- `parser_parse_error_is_constructible_and_displayable`
-- `engine_engine_error_is_constructible_and_displayable`
-- `repl_repl_is_constructible`
-- `explain_explain_is_constructible`
-- `cli_accepts_file_argument`
-- `cli_accepts_stage_argument`
-- `cli_rejects_missing_file_argument`
+Key test groups:
+
+- `tests/scaffold.rs` — 8 integration tests for CLI, parser, engine, repl, explain
+- `src/model/fs.rs` — 40 unit tests for VirtualFs, filesystem operations, immutability
+- `src/model/state.rs` — 23 unit tests for PreviewState, InstalledRegistry, history tracking
+- `src/model/provenance.rs` — 10 unit tests for Provenance, ProvenanceSource
+- `src/model/instruction.rs` — 8 unit tests for Instruction, CopySource enums
 
 ## Key files
 
