@@ -5,11 +5,10 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 
 ## In progress
 
-_nothing yet_
+- [ ] [#1](https://github.com/automatedtomato/demu/issues/1) PR open → [#10](https://github.com/automatedtomato/demu/pull/10) — awaiting review/merge
 
 ## Up next
 
-- [ ] [#1](https://github.com/automatedtomato/demu/issues/1) feat: Cargo workspace scaffold
 - [ ] [#2](https://github.com/automatedtomato/demu/issues/2) feat: domain model types
 - [ ] [#3](https://github.com/automatedtomato/demu/issues/3) feat: Dockerfile parser (v0.1 subset)
 - [ ] [#4](https://github.com/automatedtomato/demu/issues/4) feat: engine — apply instructions to PreviewState
