@@ -6,8 +6,6 @@ Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 ## In progress
 
 ## Up next
-
-- [ ] [#26](https://github.com/automatedtomato/demu/issues/26) chore: release distribution pipeline ← start here
 - [ ] [#19](https://github.com/automatedtomato/demu/issues/19) feat: RUN `&&`-chain parsing (prerequisite for RUN simulation)
 - [ ] [#20](https://github.com/automatedtomato/demu/issues/20) feat: RUN filesystem mutation simulation
 - [ ] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry
@@ -18,6 +16,7 @@ Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 
 ## Done
 
+- [x] [#26](https://github.com/automatedtomato/demu/issues/26) chore: release distribution pipeline — merged
 - [x] Milestone planning and GitHub setup
 - [x] Design decisions: `tasks/decisions/001~003`
 - [x] Private repo + `main` / `develop` branches
