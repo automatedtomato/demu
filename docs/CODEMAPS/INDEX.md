@@ -1,11 +1,11 @@
 # demu Codemap Index
 
-**Last Updated:** 2026-03-17 (after Issue #4 completion)
+**Last Updated:** 2026-03-18 (after Issue #5 completion)
 
 ## Current state
 
-Rust crate scaffold complete with full domain model (`src/model/`), Dockerfile parser (`src/parser/`), and engine (`src/engine/`). The model layer defines all core types; the parser converts Dockerfile/Compose files into typed instruction models; the engine applies those instructions to build a preview state.
-CLI parses arguments correctly. REPL and explain remain as stubs.
+Rust crate complete with full domain model (`src/model/`), Dockerfile parser (`src/parser/`), engine (`src/engine/`), and fully interactive REPL (`src/repl/`). The model layer defines all core types; the parser converts Dockerfile/Compose files into typed instruction models; the engine applies those instructions to build a preview state; the REPL provides an interactive shell for exploring that state.
+CLI parses arguments correctly. The explain module remains as a stub.
 
 ## Module map
 
@@ -15,7 +15,7 @@ CLI parses arguments correctly. REPL and explain remain as stubs.
 | `parser` | `src/parser/` (2 submodules) | Turns Dockerfile/Compose files into typed instruction models | Complete — hand-rolled line-based parser with 19 inline unit tests and 8 fixture-based integration tests |
 | `model` | `src/model/` (5 submodules) | Typed domain model: virtual filesystem, env, layers, provenance | Complete — all types defined with 89 tests |
 | `engine` | `src/engine/` (4 submodules) | Applies parsed instructions into preview state; handles COPY, RUN, and other operations | Complete — handles COPY with recursive dirs, RUN simulation with warnings; 6 integration tests |
-| `repl` | `src/repl/mod.rs` | Interactive shell loop over preview state | Stub — `Repl` unit struct only |
+| `repl` | `src/repl/` (8 files) | Interactive shell loop: rustyline, command parsing, dispatch, path resolution, 8 standard commands | Complete — 12 files with 48+ tests covering pwd, env, help, ls, cat, cd, find, exit |
 | `explain` | `src/explain/mod.rs` | Answers provenance questions about files and instructions | Stub — `Explain` unit struct only |
 | entrypoint | `src/main.rs` | Binary entrypoint; calls `Cli::parse()` and exits | Stub — prints "preview not yet implemented" |
 | lib root | `src/lib.rs` | Re-exports `Cli` and declares all five modules | Complete for current scope |
@@ -59,6 +59,27 @@ The `src/engine/` directory contains four typed submodules:
 
 The engine applies parsed instructions to build a preview state. COPY recursively copies files and directories with provenance tracking. RUN records commands without executing them on the host. Fully tested with 6 integration tests using real fixture Dockerfiles and context directories.
 
+## REPL submodules (Issue #5)
+
+The `src/repl/` directory contains eight files implementing a fully interactive shell:
+
+| File | Key Types/Functions | Purpose |
+|------|---------------------|---------|
+| `mod.rs` | `pub fn run_repl()`, `pub fn dispatch()`, `Repl` struct | Main REPL loop: rustyline editor, prompt management, command dispatch; 28 integration tests |
+| `error.rs` | `ReplError` enum | REPL errors (path not found, unknown command, etc.) via `thiserror` |
+| `parse.rs` | `ParsedCommand` enum, `pub fn parse_input(&str)` | Input parsing: converts raw text to typed commands; handles flags (`-l`, `-la`), arguments, and patterns; 50+ unit tests |
+| `path.rs` | `pub fn resolve_path()` | Pure path arithmetic: resolves absolute/relative paths, handles `..` and `.`, never touches filesystem |
+| `commands/ls.rs` | `pub fn execute()` | Lists directory contents; supports `-l`/`-la` long format; 8 tests |
+| `commands/cd.rs` | `pub fn execute()` | Changes working directory; validates path existence; 4 tests |
+| `commands/pwd.rs` | `pub fn execute()` | Prints current working directory |
+| `commands/cat.rs` | `pub fn execute()` | Prints file contents; 5 tests |
+| `commands/find.rs` | `pub fn execute()` | Recursive filesystem search with glob pattern support (`*.rs`, `?.txt`); iterative DP traversal; 6 tests |
+| `commands/env_cmd.rs` | `pub fn execute()` | Prints environment variables in sorted order; 3 tests |
+| `commands/help.rs` | `pub fn execute()` | Displays command reference |
+| `commands/mod.rs` | Module declarations | Declares all command submodules |
+
+The REPL provides a lightweight, testable shell over the preview state. Command parsing is pure and infallible (unknown input becomes `Unknown` variant, not an error). All handlers are fully tested with 48+ unit and integration tests. Path resolution handles both absolute and relative paths without touching the real filesystem.
+
 ## Data flow (planned)
 
 From `docs/02-architecture.md`:
@@ -93,7 +114,7 @@ Toolchain is pinned to stable via `rust-toolchain.toml`.
 
 ## Test coverage
 
-**159 tests pass; zero clippy warnings.**
+**287 tests pass; zero clippy warnings.** (125 new tests added in Issue #5 for REPL)
 
 Key test groups:
 
@@ -105,6 +126,13 @@ Key test groups:
 - `src/model/state.rs` — 23 unit tests for PreviewState, InstalledRegistry, history tracking
 - `src/model/provenance.rs` — 10 unit tests for Provenance, ProvenanceSource
 - `src/model/instruction.rs` — 8 unit tests for Instruction, CopySource enums
+- `src/repl/mod.rs` — 28 integration tests for REPL dispatch and command integration
+- `src/repl/parse.rs` — 50+ unit tests for input parsing (ls, cd, pwd, cat, find, env, exit, help, unknown, empty)
+- `src/repl/commands/ls.rs` — 8 tests for directory listing
+- `src/repl/commands/cd.rs` — 4 tests for directory changes
+- `src/repl/commands/cat.rs` — 5 tests for file output
+- `src/repl/commands/find.rs` — 6 tests for recursive search
+- `src/repl/commands/env_cmd.rs` — 3 tests for environment variables
 - Engine unit tests — embedded in `src/engine/*.rs` modules, covering error handling and instruction application
 
 ## Key files

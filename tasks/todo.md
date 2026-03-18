@@ -5,9 +5,10 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 
 ## In progress
 
+- [ ] [#5](https://github.com/automatedtomato/demu/issues/5) feat: REPL — standard shell commands — PR [#14](https://github.com/automatedtomato/demu/pull/14) open
+
 ## Up next
 
-- [ ] [#5](https://github.com/automatedtomato/demu/issues/5) feat: REPL — standard shell commands
 - [ ] [#6](https://github.com/automatedtomato/demu/issues/6) feat: REPL — custom inspection commands
 - [ ] [#7](https://github.com/automatedtomato/demu/issues/7) feat: CLI entrypoint
 - [ ] [#8](https://github.com/automatedtomato/demu/issues/8) test: integration fixtures for v0.1
