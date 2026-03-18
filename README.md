@@ -1,40 +1,93 @@
 # demu
 
-`demu` is a fast preview shell for Dockerfile and Compose files.
+`demu` is a fast preview shell for Dockerfiles.
 
-It lets you inspect the **filesystem, env, stages, mounts, and simulated installed packages** a config is trying to create, **without fully building or running containers**.
+It lets you inspect the **filesystem, environment variables, and instruction history** a Dockerfile is trying to create — **without building or running a container**.
 
 ## Why
 
-When you are editing a `Dockerfile` or `compose.yaml`, you often just want to answer questions like:
+When you are editing a `Dockerfile`, you often just want to answer questions like:
 
 - What files would be visible?
 - What is the working directory?
 - What env vars would exist?
 - Did this `COPY` land where I think it did?
-- Does this image look like it has `curl`, `git`, or `fastapi` installed?
+- What did each instruction actually do?
 
 `demu` is for that fast feedback loop.
 
-## Example
+## Install
+
+Requires Rust stable (`rustup` recommended).
+
+```bash
+git clone https://github.com/automatedtomato/demu.git
+cd demu
+cargo install --path .
+```
+
+Or build without installing:
+
+```bash
+cargo build --release
+# binary at: ./target/release/demu
+```
+
+## Usage
 
 ```bash
 demu -f Dockerfile
-demu -f Dockerfile --stage builder
 ```
 
-Inside the preview shell:
+This parses the Dockerfile, runs the simulation engine, prints any warnings, and drops you into an interactive preview shell.
+
+### Shell commands
+
+| Command | Description |
+|---------|-------------|
+| `ls [path]` | List directory contents |
+| `ls -la [path]` | List with details |
+| `cd <path>` | Change directory |
+| `pwd` | Print working directory |
+| `cat <file>` | Print file contents |
+| `find [path] [-name pattern]` | Search for files |
+| `env` | Print all environment variables |
+| `help` | Show available commands |
+| `exit` | Quit the shell |
+
+### Custom inspection commands
+
+| Command | Description |
+|---------|-------------|
+| `:history` | Show each instruction and its effect, in order |
+| `:layers` | Show a Docker-style layer summary |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-f <path>` | Path to the Dockerfile (required) |
+| `--version` | Print version |
+| `--help` | Print help |
+
+### Demo
+
+Try the included demo Dockerfile:
 
 ```bash
-ls -la
+demu -f demo.dockerfile
+```
+
+Then explore:
+
+```bash
+pwd          # /app/src
 cd /app
-cat package.json
-find .
+ls -la
+cat config/app.conf
 env
-:layers
 :history
-:installed
-:explain /app/main.py
+:layers
 exit
 ```
 
@@ -46,39 +99,26 @@ exit
 - a Docker replacement
 - a full shell emulator
 - a dependency solver
-- a Kubernetes tool
 
-It prefers **fast, safe previews** over perfect fidelity.
+It prefers **fast, safe previews** over perfect fidelity. Simulated behavior is always surfaced via warnings so you know what is approximated.
 
 ## Status
 
-**Current: REPL shell complete — v0.1.0 in progress (after PR #5, Issue #5).**
+**v0.1.0** — Dockerfile preview shell complete.
 
-The Rust crate has a complete Dockerfile parser, typed domain model, fully working preview engine, and a fully interactive REPL shell. The explain module remains as a stub.
+| Feature | Status |
+|---------|--------|
+| `FROM`, `WORKDIR`, `COPY`, `ENV` | Fully simulated |
+| `RUN` | History recorded; execution stubbed |
+| `ls`, `cd`, `pwd`, `cat`, `find`, `env` | Working |
+| `:history`, `:layers` | Working |
+| `:installed`, `which`, `:reload` | Planned for v0.2 |
+| `:explain <path>` | Planned for v0.3 |
+| Compose support | Planned for v0.4 |
 
-What works today:
-
-- `demu -f <path>` parses arguments correctly
-- Dockerfile parsing: `FROM`, `RUN`, `COPY`, `ENV`, `WORKDIR`, plus other instructions
-- Virtual filesystem with immutable tree updates and provenance tracking
-- Engine applies all parsed instructions: COPY reads real files from build context, RUN records commands
-- REPL loop with 12 standard shell commands: `ls`, `cd`, `pwd`, `cat`, `find`, `env`, `exit`, `help` (plus `quit`)
-- REPL supports path resolution, `-l`/`-la` flags on `ls`, `-name` pattern matching on `find`
-- 260+ tests pass (all with zero clippy warnings)
-- `cargo build` and `cargo test` succeed with zero clippy warnings
-
-What does not work yet:
-
-- `:explain` command (provenance query)
-- Custom commands (`:layers`, `:history`, `:installed`, `:mounts`, `:services`, `:stage`)
-- Compose mode support
-- Runtime integration (binary still prints `"demu: preview not yet implemented"`)
-
-The first target is a Dockerfile-focused MVP. Compose support comes after.
+See the [roadmap](./docs/07-roadmap.md) for the full plan.
 
 ## Building and testing
-
-Requires Rust stable (managed via `rust-toolchain.toml`).
 
 ```bash
 cargo build
@@ -87,13 +127,11 @@ cargo test
 
 ## Dev environment
 
-A containerized dev environment is provided via Docker Compose:
+A containerized dev environment is available via Docker Compose:
 
 ```bash
 docker compose -f docker-compose.dev.yml run --rm dev bash
 ```
-
-Inside the container, `cargo build` and `cargo test` work without a local Rust install.
 
 ## Docs
 
@@ -102,7 +140,5 @@ Inside the container, `cargo build` and `cargo test` work without a local Rust i
 - [CLI and REPL](./docs/03-cli-and-repl.md)
 - [Dockerfile Semantics](./docs/04-dockerfile-semantics.md)
 - [RUN Simulation](./docs/05-run-simulation.md)
-- [Compose Plan](./docs/06-compose-plan.md)
 - [Roadmap](./docs/07-roadmap.md)
 - [Test Strategy](./docs/08-test-strategy.md)
-- [Codemap Index](./docs/CODEMAPS/INDEX.md)
