@@ -2,6 +2,13 @@
 /target/
 Cargo.lock
 
+# Coverage / profiling artifacts
+*.profraw
+*.profdata
+lcov.info
+tarpaulin-report.html
+tarpaulin-report.json
+
 # IDE
 .idea/
 .vscode/
