@@ -43,16 +43,14 @@ pub fn execute(state: &PreviewState, path: &str, writer: &mut impl Write) -> Res
         }
         Some(FsNode::Directory(_)) => Err(ReplError::NotAFile { path: resolved }),
         Some(FsNode::Symlink(s)) => {
-            // We don't follow symlinks automatically. Normalise the target
-            // against virtual root so we can warn if it would escape via `..`.
-            use crate::repl::path::resolve_path;
-            let normalized_target =
-                resolve_path(std::path::Path::new("/"), &s.target.to_string_lossy());
-            let escaped = normalized_target == std::path::Path::new("/")
-                && s.target.to_string_lossy() != "/"
-                && s.target.to_string_lossy() != "";
-            let note = if escaped {
-                " (warning: target resolves outside virtual root)"
+            // We don't follow symlinks automatically. Warn if the raw target
+            // contains `..` components — any relative traversal from within a
+            // container subtree could be misleading regardless of where it
+            // ultimately resolves.
+            use std::path::Component;
+            let has_dotdot = s.target.components().any(|c| c == Component::ParentDir);
+            let note = if has_dotdot {
+                " (warning: target contains '..', may escape virtual root)"
             } else {
                 " (symlink, follow manually)"
             };
