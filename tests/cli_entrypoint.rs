@@ -197,8 +197,12 @@ fn directory_path_exits_one() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        !stderr.is_empty(),
-        "directory-as-file error must produce a stderr message"
+        stderr.starts_with("demu:"),
+        "directory error must begin with 'demu:' prefix, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("not a regular file") || stderr.contains("is not"),
+        "directory error must mention the path is not a regular file, got: {stderr}"
     );
 }
 
@@ -223,6 +227,16 @@ fn malformed_dockerfile_exits_one() {
         "malformed Dockerfile must exit 1, got: {:?}\nstderr: {}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("demu:"),
+        "parse error must begin with 'demu:' prefix, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("parse") || stderr.contains("failed"),
+        "parse error must mention parse failure, got: {stderr}"
     );
 }
 
@@ -250,22 +264,62 @@ fn multi_instruction_dockerfile_with_eof_stdin_exits_zero() {
     );
 }
 
-// ── test 10: stderr error message includes "demu:" prefix ────────────────────
+// ── test 10: --stage flag emits a "not yet implemented" warning ──────────────
 
 #[test]
-fn fatal_error_message_includes_demu_prefix() {
-    // When `run_cli()` returns an `Err`, `main()` formats it as "demu: <msg>"
-    // before printing to stderr. This makes the binary behave consistently with
-    // other Unix tools (git, cargo, etc.) where the program name prefixes errors.
+fn stage_flag_emits_not_implemented_warning() {
+    // `--stage` is parsed by clap but not yet wired to the engine. The CLI must
+    // emit a `warning:` to stderr so the flag is never a silent no-op.
+    let dockerfile = temp_dockerfile("FROM scratch\n");
+
     let output = demu()
-        .args(["-f", "/nonexistent/Dockerfile"])
+        .args([
+            "-f",
+            dockerfile.path().to_str().expect("path to str"),
+            "--stage",
+            "builder",
+        ])
         .stdin(Stdio::null())
         .output()
         .expect("failed to run demu");
 
+    // The process must still exit 0 (the flag is ignored, not fatal).
+    assert!(
+        output.status.success(),
+        "--stage should not cause a fatal exit, got: {:?}",
+        output.status
+    );
+
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.starts_with("demu:"),
-        "fatal error must begin with 'demu:', got: {stderr}"
+        stderr.contains("warning:"),
+        "--stage must emit a 'warning:' line, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("stage"),
+        "--stage warning must mention 'stage', got: {stderr}"
+    );
+}
+
+// ── test 11: empty Dockerfile (no instructions) exits 0 ──────────────────────
+
+#[test]
+fn empty_dockerfile_with_eof_stdin_exits_zero() {
+    // A Dockerfile with no instructions (blank or comment-only) is syntactically
+    // valid. The engine produces a default PreviewState and the REPL starts
+    // normally. With closed stdin it must exit 0.
+    let dockerfile = temp_dockerfile("# just a comment\n");
+
+    let output = demu()
+        .args(["-f", dockerfile.path().to_str().expect("path to str")])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert!(
+        output.status.success(),
+        "empty/comment Dockerfile + EOF stdin must exit 0, got: {:?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
     );
 }
