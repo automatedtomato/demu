@@ -8,6 +8,7 @@ use std::io::Write;
 
 use crate::model::state::PreviewState;
 use crate::repl::error::ReplError;
+use crate::repl::sanitize::sanitize_for_terminal;
 
 /// Execute the `:history` command.
 ///
@@ -41,12 +42,20 @@ pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), Repl
     let line_width = max_line.to_string().len();
 
     for entry in &state.history {
+        // Sanitize user-controlled fields before writing to the terminal.
+        // `entry.instruction` contains raw Dockerfile instruction text and can
+        // embed ANSI escape sequences that would be interpreted by the terminal
+        // emulator. `entry.effect` is engine-generated but sanitized
+        // defensively since it may include user-supplied tokens in the future.
+        let safe_instruction = sanitize_for_terminal(&entry.instruction);
+        let safe_effect = sanitize_for_terminal(&entry.effect);
+
         writeln!(
             writer,
             "{:>width$}  {}  ->  {}",
             entry.line,
-            entry.instruction,
-            entry.effect,
+            safe_instruction,
+            safe_effect,
             width = line_width,
         )
         .map_err(io_err)?;

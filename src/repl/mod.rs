@@ -10,6 +10,7 @@ pub mod custom;
 pub mod error;
 pub mod parse;
 pub mod path;
+pub(crate) mod sanitize;
 
 /// Placeholder struct kept for backward-compatibility with integration tests
 /// that were written against the initial module scaffold.
@@ -27,6 +28,7 @@ use crate::repl::commands::{cat, cd, env_cmd, find, help, ls, pwd};
 use crate::repl::custom::{history, layers};
 use crate::repl::error::ReplError;
 use crate::repl::parse::{parse_input, ParsedCommand};
+use crate::repl::sanitize::sanitize_for_terminal;
 
 /// Run the interactive REPL until the user exits.
 ///
@@ -88,25 +90,6 @@ pub fn run_repl(state: &mut PreviewState) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-/// Strip terminal-unsafe characters from a string before printing to stderr.
-///
-/// Removes:
-/// - C0 control characters: U+0000–U+001F (includes ESC, NUL, CR, LF, TAB)
-/// - DEL: U+007F
-/// - C1 control characters: U+0080–U+009F (includes CSI U+009B, which some
-///   terminal emulators treat as an ANSI escape sequence introducer)
-///
-/// This prevents terminal escape injection when echoing user-supplied input.
-fn sanitize_for_terminal(s: &str) -> String {
-    s.chars()
-        .filter(|&c| {
-            let cp = c as u32;
-            // Allow printable ASCII and all codepoints above the C1 range.
-            !(cp <= 0x1F || cp == 0x7F || (0x80..=0x9F).contains(&cp))
-        })
-        .collect()
 }
 
 /// Dispatch a parsed command to the appropriate handler.

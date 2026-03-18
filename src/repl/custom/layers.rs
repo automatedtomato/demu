@@ -9,6 +9,7 @@ use std::io::Write;
 
 use crate::model::state::PreviewState;
 use crate::repl::error::ReplError;
+use crate::repl::sanitize::sanitize_for_terminal;
 
 /// Execute the `:layers` command.
 ///
@@ -38,17 +39,30 @@ pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), Repl
         return writeln!(writer, "No layers recorded.").map_err(io_err);
     }
 
+    // Compute the digit width of the largest layer index for right-aligned
+    // numbering. This keeps columns aligned even when there are 10+ layers.
+    let num_width = state.layers.len().to_string().len();
+
     for (i, layer) in state.layers.iter().enumerate() {
         // Layer index is 1-based, matching Docker's own layer numbering.
         let layer_num = i + 1;
         let file_count = layer.files_changed.len();
         let env_count = layer.env_changed.len();
 
+        // Sanitize instruction_type defensively: it is engine-generated today,
+        // but if future code ever populates it from raw Dockerfile text we do
+        // not want to introduce a terminal escape injection path.
+        let safe_type = sanitize_for_terminal(&layer.instruction_type);
+
         // Instruction type is left-padded to 11 chars for column alignment.
         writeln!(
             writer,
-            "Layer {layer_num:<2}  {:<11}  {} file(s) changed, {} env var(s) changed",
-            layer.instruction_type, file_count, env_count,
+            "Layer {:>width$}  {:<11}  {} file(s) changed, {} env var(s) changed",
+            layer_num,
+            safe_type,
+            file_count,
+            env_count,
+            width = num_width,
         )
         .map_err(io_err)?;
     }
