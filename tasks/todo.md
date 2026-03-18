@@ -5,8 +5,6 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 
 ## In progress
 
-- [ ] [#5](https://github.com/automatedtomato/demu/issues/5) feat: REPL — standard shell commands — PR [#14](https://github.com/automatedtomato/demu/pull/14) open
-
 ## Up next
 
 - [ ] [#6](https://github.com/automatedtomato/demu/issues/6) feat: REPL — custom inspection commands
@@ -22,3 +20,4 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 - [x] [#2](https://github.com/automatedtomato/demu/issues/2) feat: domain model types
 - [x] [#3](https://github.com/automatedtomato/demu/issues/3) feat: Dockerfile parser (v0.1 subset)
 - [x] [#4](https://github.com/automatedtomato/demu/issues/4) feat: engine — apply instructions to PreviewState
+- [x] [#5](https://github.com/automatedtomato/demu/issues/5) feat: REPL — standard shell commands — merged [#14](https://github.com/automatedtomato/demu/pull/14)
