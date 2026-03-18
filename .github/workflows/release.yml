@@ -44,6 +44,22 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
+      # Verify the binary was produced before attempting to package it.
+      # Catches silent build failures where cargo exits 0 but produces no output.
+      - name: Verify binary exists (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: test -f target/${{ matrix.target }}/release/demu
+
+      - name: Verify binary exists (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "target\${{ matrix.target }}\release\demu.exe")) {
+            Write-Error "Binary not found: target\${{ matrix.target }}\release\demu.exe"
+            exit 1
+          }
+
       # Strip debug symbols on Linux and macOS to reduce archive size.
       # Uses the platform's system `strip` (GNU strip on Linux, Apple strip on macOS).
       # Both handle their native architecture correctly. On macos-13 (Intel),
@@ -102,7 +118,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c062e08bd532815e2082a7e09ce9f67414337ee0  # v2.2.1
         with:
-          files: demu-*
+          files: |
+            demu-*.tar.gz
+            demu-*.zip
           generate_release_notes: true
 
   publish:
@@ -120,10 +138,14 @@ jobs:
 
       # Fail immediately with a clear message if the registry token is not
       # configured, rather than letting cargo produce a generic auth error.
+      # The secret is assigned to a step-level env var so it is never
+      # interpolated directly into the shell source via ${{ }}.
       - name: Verify registry token is set
+        env:
+          TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         shell: bash
         run: |
-          if [ -z "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
+          if [ -z "${TOKEN}" ]; then
             echo "::error::CARGO_REGISTRY_TOKEN secret is not set. Add it at Settings > Secrets > Actions before publishing."
             exit 1
           fi
@@ -134,13 +156,18 @@ jobs:
       - name: Verify tag matches Cargo.toml version
         shell: bash
         run: |
-          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           TAG_VERSION=${GITHUB_REF_NAME#v}
           if [ "${CARGO_VERSION}" != "${TAG_VERSION}" ]; then
             echo "::error::Version mismatch: Cargo.toml has '${CARGO_VERSION}' but tag is '${GITHUB_REF_NAME}' (expected '${TAG_VERSION}'). Bump the version in Cargo.toml before tagging."
             exit 1
           fi
           echo "Version check passed: ${CARGO_VERSION}"
+
+      # Dry-run first to catch packaging errors (missing files, bad metadata)
+      # without consuming the version slot on crates.io.
+      - name: Publish dry-run
+        run: cargo publish --dry-run
 
       # Pass the token via environment variable so it never appears in the
       # process argument list or cargo's verbose log output.
