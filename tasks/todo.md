@@ -7,8 +7,6 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 
 ## Up next
 
-- [ ] [#8](https://github.com/automatedtomato/demu/issues/8) test: integration fixtures for v0.1
-
 ## Done
 
 - [x] Milestone planning and GitHub setup
@@ -21,3 +19,4 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 - [x] [#5](https://github.com/automatedtomato/demu/issues/5) feat: REPL — standard shell commands — merged [#14](https://github.com/automatedtomato/demu/pull/14)
 - [x] [#6](https://github.com/automatedtomato/demu/issues/6) feat: REPL — custom inspection commands (`:layers`, `:history`) — merged [#15](https://github.com/automatedtomato/demu/pull/15)
 - [x] [#7](https://github.com/automatedtomato/demu/issues/7) feat: CLI entrypoint — merged [#16](https://github.com/automatedtomato/demu/pull/16)
+- [x] [#8](https://github.com/automatedtomato/demu/issues/8) test: integration fixtures for v0.1 — merged [#17](https://github.com/automatedtomato/demu/pull/17)
