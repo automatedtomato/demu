@@ -257,6 +257,34 @@ mod tests {
         );
     }
 
+    // --- Root search on empty filesystem ---
+
+    #[test]
+    fn find_root_on_empty_fs_returns_ok_with_empty_output() {
+        let state = PreviewState::default(); // empty VirtualFs
+        let lines = run(&state, "/", None).expect("find / on empty fs should return Ok");
+        assert!(
+            lines.is_empty(),
+            "empty fs must produce no output, got: {lines:?}"
+        );
+    }
+
+    // --- Pattern that matches nothing returns Ok with empty output ---
+
+    #[test]
+    fn find_unmatched_pattern_returns_ok_empty_output() {
+        let mut fs = VirtualFs::new();
+        fs.insert(PathBuf::from("/app/main.rs"), file_node());
+        fs.insert(PathBuf::from("/app/lib.rs"), file_node());
+        let state = state_with_fs(fs);
+        // *.txt matches nothing in a directory of .rs files.
+        let lines = run(&state, "/app", Some("*.txt")).expect("unmatched pattern should return Ok");
+        assert!(
+            lines.is_empty(),
+            "unmatched pattern must produce empty output, got: {lines:?}"
+        );
+    }
+
     // --- Nonexistent base ---
 
     #[test]

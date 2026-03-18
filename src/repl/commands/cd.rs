@@ -181,6 +181,40 @@ mod tests {
         );
     }
 
+    // --- Implicit directory (no DirNode, only children) ---
+
+    #[test]
+    fn cd_into_implicit_directory_succeeds() {
+        // Insert only a file — no explicit DirNode for /app/src.
+        // cd should still succeed because /app/src has children.
+        let mut fs = VirtualFs::new();
+        fs.insert(PathBuf::from("/app/src/main.rs"), file_node());
+        let mut state = state_with_fs(fs);
+        run(&mut state, "/app/src").expect("cd into implicit dir should succeed");
+        assert_eq!(state.cwd, PathBuf::from("/app/src"));
+    }
+
+    // --- Symlink target returns NotADirectory ---
+
+    #[test]
+    fn cd_into_symlink_returns_not_a_directory() {
+        use crate::model::fs::SymlinkNode;
+        let mut fs = VirtualFs::new();
+        fs.insert(
+            PathBuf::from("/app/link"),
+            FsNode::Symlink(SymlinkNode {
+                target: PathBuf::from("/usr/bin/python3"),
+                provenance: make_provenance(),
+            }),
+        );
+        let mut state = state_with_fs(fs);
+        let result = run(&mut state, "/app/link");
+        assert!(
+            matches!(result, Err(ReplError::NotADirectory { .. })),
+            "cd into a symlink must return NotADirectory"
+        );
+    }
+
     // --- No output on success ---
 
     #[test]

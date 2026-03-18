@@ -199,8 +199,42 @@ mod tests {
         // 0xFF is not valid UTF-8; String::from_utf8_lossy replaces it with U+FFFD.
         fs.insert(PathBuf::from("/app/binary"), file_node(b"\xFF\xFE"));
         let state = state_with_fs(fs);
-        // Should succeed without panicking, returning replacement characters.
-        let result = run(&state, "/app/binary");
-        assert!(result.is_ok(), "cat should succeed with lossy conversion");
+        let out = run(&state, "/app/binary").expect("cat should succeed with lossy conversion");
+        // Replacement character U+FFFD must appear in the output.
+        assert!(
+            out.contains('\u{FFFD}'),
+            "non-UTF-8 bytes must produce U+FFFD replacement chars, got: {out:?}"
+        );
+    }
+
+    // --- Symlink with escaping target warns the user ---
+
+    #[test]
+    fn cat_symlink_with_dotdot_target_emits_escape_warning() {
+        let mut fs = VirtualFs::new();
+        // A symlink whose target contains `..` components could be misleading.
+        fs.insert(PathBuf::from("/app/link"), symlink_node("../../etc/passwd"));
+        let state = state_with_fs(fs);
+        let out = run(&state, "/app/link").expect("should succeed");
+        assert!(
+            out.contains("warning"),
+            "escaping symlink target must show warning, got: {out}"
+        );
+        assert!(
+            out.contains("../../etc/passwd"),
+            "target path must be shown, got: {out}"
+        );
+    }
+
+    // --- Empty path argument returns InvalidArguments ---
+
+    #[test]
+    fn cat_empty_path_returns_invalid_arguments() {
+        let state = PreviewState::default();
+        let result = run(&state, "");
+        assert!(
+            matches!(result, Err(ReplError::InvalidArguments { ref command, .. }) if command == "cat"),
+            "cat with empty path must return InvalidArguments, got: {result:?}"
+        );
     }
 }

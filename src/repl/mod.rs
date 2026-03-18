@@ -319,4 +319,31 @@ mod tests {
         let result = dispatch_str(&mut state, "cat /nonexistent.txt");
         assert!(matches!(result, Err(ReplError::PathNotFound { .. })));
     }
+
+    // --- cat with no argument returns InvalidArguments (not a confusing dir error) ---
+
+    #[test]
+    fn dispatch_cat_no_argument_returns_invalid_arguments() {
+        let mut state = PreviewState::default();
+        let result = dispatch_str(&mut state, "cat");
+        assert!(
+            matches!(result, Err(ReplError::InvalidArguments { ref command, .. }) if command == "cat"),
+            "cat with no args must return InvalidArguments, got: {result:?}"
+        );
+    }
+
+    // --- ls -l long format propagates through dispatch ---
+
+    #[test]
+    fn dispatch_ls_long_format_shows_type_prefix() {
+        let mut state = state_with_files();
+        state.cwd = PathBuf::from("/app");
+        let (cont, out) = dispatch_str(&mut state, "ls -l").expect("ls -l should succeed");
+        assert!(cont);
+        // Directories get `d` prefix, files get `-` prefix in long format.
+        assert!(
+            out.contains('d') || out.contains('-'),
+            "long format must include type prefix, got: {out}"
+        );
+    }
 }
