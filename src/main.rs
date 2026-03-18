@@ -16,7 +16,10 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use demu::{engine, parser::dockerfile::parse_dockerfile, repl::run_repl, Cli};
+use demu::{
+    engine, parser::dockerfile::parse_dockerfile, repl::run_repl,
+    repl::sanitize::sanitize_for_terminal, Cli,
+};
 
 /// Full CLI pipeline. Returns `Err` for any unrecoverable failure.
 ///
@@ -24,6 +27,14 @@ use demu::{engine, parser::dockerfile::parse_dockerfile, repl::run_repl, Cli};
 /// formatting in `main` trivially straightforward.
 fn run_cli() -> Result<()> {
     let cli = Cli::parse();
+
+    // ── 0. Surface unimplemented flags early ─────────────────────────────────
+
+    // `--stage` is parsed by clap but not yet wired into the engine. Emit a
+    // warning so the user knows the flag was received but has no effect.
+    if cli.stage.is_some() {
+        eprintln!("warning: --stage is not yet implemented and will be ignored");
+    }
 
     // ── 1. Validate the path ─────────────────────────────────────────────────
 
@@ -78,9 +89,12 @@ fn run_cli() -> Result<()> {
     // ── 6. Print warnings to stderr ──────────────────────────────────────────
 
     // Warnings are non-fatal diagnostics that tell the user where the
-    // simulation is approximate or incomplete.
+    // simulation is approximate or incomplete. Sanitize before printing —
+    // Warning strings embed user-supplied data from the Dockerfile (image
+    // names, instruction text, paths) that could contain ANSI escape bytes.
     for warning in &state.warnings {
-        eprintln!("warning: {warning}");
+        let safe = sanitize_for_terminal(&warning.to_string());
+        eprintln!("warning: {safe}");
     }
 
     // ── 7. Enter the interactive REPL ────────────────────────────────────────
@@ -95,7 +109,10 @@ fn main() {
     // conventions (e.g. `git: …`, `cargo: …`) and makes the source obvious when
     // output is piped or logged.
     if let Err(err) = run_cli() {
-        eprintln!("demu: {err}");
+        // Sanitize the error string — anyhow error chains include user-supplied
+        // data (file paths, instruction text) that could embed ANSI escape bytes.
+        let safe = sanitize_for_terminal(&err.to_string());
+        eprintln!("demu: {safe}");
         std::process::exit(1);
     }
 }

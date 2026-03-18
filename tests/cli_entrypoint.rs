@@ -66,8 +66,12 @@ fn nonexistent_file_exits_one_with_error_message() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        !stderr.is_empty(),
-        "stderr must contain an error message, got empty"
+        stderr.starts_with("demu:"),
+        "stderr must begin with 'demu:' prefix, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("not found") || stderr.contains("No such"),
+        "stderr must mention that the file was not found, got: {stderr}"
     );
 }
 
@@ -165,8 +169,8 @@ fn warnings_are_printed_to_stderr() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("warning:") || stderr.contains("ubuntu"),
-        "stderr must contain a warning about the unmodeled base image, got: {stderr}"
+        stderr.contains("warning:"),
+        "stderr must contain a 'warning:' prefixed message about the unmodeled base image, got: {stderr}"
     );
 }
 

@@ -10,7 +10,7 @@ pub mod custom;
 pub mod error;
 pub mod parse;
 pub mod path;
-pub(crate) mod sanitize;
+pub mod sanitize;
 
 /// Placeholder struct kept for backward-compatibility with integration tests
 /// that were written against the initial module scaffold.
@@ -45,7 +45,10 @@ pub fn run_repl(state: &mut PreviewState) -> anyhow::Result<()> {
 
     loop {
         // Build the prompt from the current working directory.
-        let prompt = format!("demu:{}$ ", state.cwd.display());
+        // Sanitize the cwd before embedding it in the prompt — WORKDIR
+        // instructions are user-controlled and could contain ANSI escape bytes.
+        let safe_cwd = sanitize_for_terminal(&state.cwd.display().to_string());
+        let prompt = format!("demu:{safe_cwd}$ ");
 
         match editor.readline(&prompt) {
             Ok(line) => {

@@ -15,7 +15,7 @@
 ///
 /// This prevents terminal escape injection when echoing user-supplied input
 /// such as raw Dockerfile instruction text or file paths.
-pub(crate) fn sanitize_for_terminal(s: &str) -> String {
+pub fn sanitize_for_terminal(s: &str) -> String {
     s.chars()
         .filter(|&c| {
             let cp = c as u32;
