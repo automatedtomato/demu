@@ -49,18 +49,30 @@ In Compose mode, optionally include service name:
 demu[api]:/{app}$ 
 ```
 
-## Supported shell commands for MVP
+## Supported shell commands (Issue #5 — implemented)
 
-- `ls`
-- `cd`
-- `pwd`
-- `cat`
-- `find`
-- `env`
-- `exit`
-- `help`
+All commands operate on the preview state virtual filesystem and environment, not the host shell.
 
-These operate on preview state, not the host shell.
+### Basic navigation and inspection
+
+- `ls [path]` — list directory contents. Options: `-l`, `-la`, `-al` for long format
+- `cd [path]` — change working directory; defaults to `/` when omitted
+- `pwd` — print working directory
+- `cat <path>` — print file contents (text files only)
+- `find [path] [-name <pattern>]` — recursively search for files; path defaults to `/`; `-name` supports glob patterns
+
+### Environment and session
+
+- `env` — print all environment variables in sorted order
+- `exit` / `quit` — exit the REPL session
+- `help` — display command reference
+
+### Implementation notes
+
+- **Path resolution:** Both absolute (`/app/main.rs`) and relative (`../foo`) paths are resolved correctly.
+- **Globbing:** The `find -name` command supports `*` and `?` glob patterns (simple glob, not full shell expansion).
+- **Long format:** `ls -l` and `ls -la` display extended metadata when available (permissions, provenance source).
+- **Error messages:** All errors are user-friendly and indicate whether a path is missing, a command is unsupported, or behavior is being simulated.
 
 ## Custom commands
 

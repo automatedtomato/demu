@@ -1,0 +1,22 @@
+FROM rust:1-slim-bookworm
+
+# System dependencies for rustyline (terminal support) and git
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin toolchain so component installs match what containers will use
+COPY rust-toolchain.toml .
+RUN rustup show active-toolchain || true
+
+# Install Rust toolchain components
+RUN rustup component add rustfmt clippy
+
+# Install cargo tools
+RUN cargo install cargo-watch
+
+WORKDIR /app
+
+# Keep container running for exec-based workflow
+CMD ["bash"]

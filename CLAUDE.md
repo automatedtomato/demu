@@ -73,6 +73,8 @@ Not allowed to promise:
 
 The `.claude/` directory contains rules, agents, commands, and skills that govern how to work in this repository. Consult the relevant resource before making decisions.
 
+> **Task tracking:** Always read and update [`tasks/todo.md`](tasks/todo.md) at the start and end of every session. It is the persistent source of truth for what is in progress, up next, and done. See [development-workflow.md](.claude/rules/common/development-workflow.md) for the full convention.
+
 ### Rules
 
 Standards and checklists that apply to all code in this repo.
