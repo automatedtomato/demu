@@ -1,16 +1,14 @@
 # demu — task tracking
 
-Milestone: [Release v0.1.0](https://github.com/automatedtomato/demu/milestone/1)
-Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
+Milestone: [Release v0.2.0](https://github.com/automatedtomato/demu/milestone/2)
+Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 
 ## In progress
 
 ## Up next
 
-Milestone: [Release v0.2.0](https://github.com/automatedtomato/demu/milestone/2)
-Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
-
-- [ ] [#19](https://github.com/automatedtomato/demu/issues/19) feat: RUN `&&`-chain parsing ← start here (prerequisite)
+- [ ] [#26](https://github.com/automatedtomato/demu/issues/26) chore: release distribution pipeline ← start here
+- [ ] [#19](https://github.com/automatedtomato/demu/issues/19) feat: RUN `&&`-chain parsing (prerequisite for RUN simulation)
 - [ ] [#20](https://github.com/automatedtomato/demu/issues/20) feat: RUN filesystem mutation simulation
 - [ ] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry
 - [ ] [#22](https://github.com/automatedtomato/demu/issues/22) feat: REPL `:installed` + `which`
