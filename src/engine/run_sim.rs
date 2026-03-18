@@ -186,10 +186,7 @@ mod tests {
 
     #[test]
     fn split_semicolon_chain() {
-        assert_eq!(
-            split_commands("echo a; echo b"),
-            vec!["echo a", "echo b"]
-        );
+        assert_eq!(split_commands("echo a; echo b"), vec!["echo a", "echo b"]);
     }
 
     #[test]
@@ -237,10 +234,7 @@ mod tests {
     #[test]
     fn split_does_not_split_on_or_operator() {
         // `||` is not a recognized delimiter and must be preserved intact.
-        assert_eq!(
-            split_commands("cmd1 || fallback"),
-            vec!["cmd1 || fallback"]
-        );
+        assert_eq!(split_commands("cmd1 || fallback"), vec!["cmd1 || fallback"]);
     }
 
     // ── handle_run integration tests ──────────────────────────────────────
@@ -325,7 +319,11 @@ mod tests {
         let mut state = PreviewState::default();
         handle_run(&mut state, "cmd1 || fallback", 1);
 
-        assert_eq!(state.warnings.len(), 1, "|| must not split into two warnings");
+        assert_eq!(
+            state.warnings.len(),
+            1,
+            "|| must not split into two warnings"
+        );
         assert!(
             matches!(
                 &state.warnings[0],
@@ -341,7 +339,10 @@ mod tests {
         let mut state = PreviewState::default();
         let layer = handle_run(&mut state, "", 1);
 
-        assert!(state.warnings.is_empty(), "empty command must emit no warnings");
+        assert!(
+            state.warnings.is_empty(),
+            "empty command must emit no warnings"
+        );
         assert_eq!(layer.instruction_type, "RUN");
         assert!(layer.files_changed.is_empty());
         assert!(layer.env_changed.is_empty());
