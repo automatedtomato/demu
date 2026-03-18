@@ -4,6 +4,9 @@
 // terminal. This prevents escape-sequence injection when user-controlled data
 // (Dockerfile instruction text, file paths, env var values) is echoed back to
 // the user.
+//
+// Used by both the REPL layer (repl/mod.rs, repl/custom/) and the binary
+// entrypoint (main.rs) so it lives here in `output` rather than under `repl`.
 
 /// Strip terminal-unsafe characters from a string before printing.
 ///
@@ -15,7 +18,7 @@
 ///
 /// This prevents terminal escape injection when echoing user-supplied input
 /// such as raw Dockerfile instruction text or file paths.
-pub(crate) fn sanitize_for_terminal(s: &str) -> String {
+pub fn sanitize_for_terminal(s: &str) -> String {
     s.chars()
         .filter(|&c| {
             let cp = c as u32;

@@ -8,8 +8,8 @@
 use std::io::Write;
 
 use crate::model::state::PreviewState;
+use crate::output::sanitize::sanitize_for_terminal;
 use crate::repl::error::ReplError;
-use crate::repl::sanitize::sanitize_for_terminal;
 
 /// Execute the `:layers` command.
 ///
