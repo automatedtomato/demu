@@ -179,24 +179,74 @@ mod tests {
         assert!(out.contains("0 env var(s)"), "got: {out}");
     }
 
-    // --- execute returns Ok ---
+    // --- Layer with both files and env vars ---
 
     #[test]
-    fn execute_returns_ok_for_empty_state() {
-        let state = PreviewState::default();
-        let mut buf = Vec::new();
-        assert!(execute(&state, &mut buf).is_ok());
-    }
-
-    #[test]
-    fn execute_returns_ok_for_non_empty_state() {
+    fn layer_with_both_files_and_env_vars_shows_correct_counts() {
         let mut state = PreviewState::default();
         state.layers.push(LayerSummary {
             instruction_type: "RUN".to_string(),
+            files_changed: vec![PathBuf::from("/app/main.rs"), PathBuf::from("/app/lib.rs")],
+            env_changed: vec![
+                ("PATH".to_string(), "/usr/bin".to_string()),
+                ("HOME".to_string(), "/root".to_string()),
+            ],
+        });
+        let out = run(&state);
+        assert!(out.contains("2 file(s)"), "got: {out}");
+        assert!(out.contains("2 env var(s)"), "got: {out}");
+    }
+
+    // --- Dynamic layer number width for 10+ layers ---
+
+    #[test]
+    fn ten_or_more_layers_right_aligns_layer_numbers() {
+        let mut state = PreviewState::default();
+        // Push 10 layers so num_width becomes 2.
+        for _ in 0..10 {
+            state.layers.push(LayerSummary {
+                instruction_type: "RUN".to_string(),
+                files_changed: vec![],
+                env_changed: vec![],
+            });
+        }
+        let out = run(&state);
+        // Layer 1 must be right-aligned within a width-2 field: " 1".
+        assert!(
+            out.contains("Layer  1  "),
+            "layer 1 must be right-aligned with width 2; got: {out}"
+        );
+        // Layer 10 must occupy both digit positions without extra space: "10".
+        assert!(
+            out.contains("Layer 10  "),
+            "layer 10 must appear without extra leading space; got: {out}"
+        );
+    }
+
+    // --- Sanitization of instruction_type ---
+
+    #[test]
+    fn instruction_type_with_escape_sequence_is_stripped_from_output() {
+        let mut state = PreviewState::default();
+        // Embed an ANSI escape sequence in the instruction type to verify
+        // that sanitize_for_terminal actually affects the printed output.
+        state.layers.push(LayerSummary {
+            instruction_type: "COPY\x1b[2J".to_string(),
             files_changed: vec![],
             env_changed: vec![],
         });
-        let mut buf = Vec::new();
-        assert!(execute(&state, &mut buf).is_ok());
+        let buf = {
+            let mut b = Vec::new();
+            execute(&state, &mut b).expect("should succeed");
+            b
+        };
+        // The ESC byte (0x1B) must not appear in the output.
+        assert!(
+            !buf.contains(&0x1B),
+            "ESC must be stripped from instruction_type output"
+        );
+        // The base text should still appear.
+        let out = String::from_utf8(buf).expect("utf-8");
+        assert!(out.contains("COPY"), "got: {out}");
     }
 }

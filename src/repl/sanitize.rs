@@ -58,6 +58,18 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_strips_nul() {
+        // NUL (0x00) is C0 and a common binary injection byte.
+        assert_eq!(sanitize_for_terminal("ab\x00cd"), "abcd");
+    }
+
+    #[test]
+    fn sanitize_strips_cr() {
+        // CR (0x0D) is C0 and can be used to overwrite terminal output.
+        assert_eq!(sanitize_for_terminal("ab\rcd"), "abcd");
+    }
+
+    #[test]
     fn sanitize_empty_string_is_empty() {
         assert_eq!(sanitize_for_terminal(""), "");
     }

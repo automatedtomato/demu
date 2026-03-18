@@ -175,24 +175,51 @@ mod tests {
         );
     }
 
-    // --- execute returns Ok ---
+    // --- Sanitization of user-controlled fields ---
 
     #[test]
-    fn execute_returns_ok_for_empty_state() {
-        let state = PreviewState::default();
-        let mut buf = Vec::new();
-        assert!(execute(&state, &mut buf).is_ok());
+    fn escape_sequence_in_instruction_is_stripped_from_output() {
+        let mut state = PreviewState::default();
+        // Embed an ANSI escape sequence in the raw instruction text — this
+        // mirrors a Dockerfile author placing control bytes in a RUN argument.
+        state.history.push(HistoryEntry {
+            line: 1,
+            instruction: "RUN echo \x1b[2J".to_string(),
+            effect: "simulated shell command".to_string(),
+        });
+        let buf = {
+            let mut b = Vec::new();
+            execute(&state, &mut b).expect("should succeed");
+            b
+        };
+        // The ESC byte (0x1B) must not appear in the printed output.
+        assert!(
+            !buf.contains(&0x1B),
+            "ESC must be stripped from instruction output"
+        );
+        // The non-escape text should still appear.
+        let out = String::from_utf8(buf).expect("utf-8");
+        assert!(out.contains("RUN echo"), "got: {out}");
     }
 
     #[test]
-    fn execute_returns_ok_for_non_empty_state() {
+    fn escape_sequence_in_effect_is_stripped_from_output() {
         let mut state = PreviewState::default();
+        // Also verify that the effect field (engine-generated but sanitized
+        // defensively) does not pass control bytes through.
         state.history.push(HistoryEntry {
-            line: 1,
-            instruction: "FROM alpine".to_string(),
-            effect: "set base image to alpine".to_string(),
+            line: 2,
+            instruction: "ENV PATH=/usr/bin".to_string(),
+            effect: "set PATH\x1b[0m".to_string(),
         });
-        let mut buf = Vec::new();
-        assert!(execute(&state, &mut buf).is_ok());
+        let buf = {
+            let mut b = Vec::new();
+            execute(&state, &mut b).expect("should succeed");
+            b
+        };
+        assert!(
+            !buf.contains(&0x1B),
+            "ESC must be stripped from effect output"
+        );
     }
 }
