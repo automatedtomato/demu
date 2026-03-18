@@ -16,7 +16,7 @@ Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 
 ## Done
 
-- [x] [#26](https://github.com/automatedtomato/demu/issues/26) chore: release distribution pipeline — merged
+- [x] [#26](https://github.com/automatedtomato/demu/issues/26) chore: release distribution pipeline — merged [#27](https://github.com/automatedtomato/demu/pull/27)
 - [x] Milestone planning and GitHub setup
 - [x] Design decisions: `tasks/decisions/001~003`
 - [x] Private repo + `main` / `develop` branches
