@@ -4,6 +4,9 @@
 // terminal. This prevents escape-sequence injection when user-controlled data
 // (Dockerfile instruction text, file paths, env var values) is echoed back to
 // the user.
+//
+// Used by both the REPL layer (repl/mod.rs, repl/custom/) and the binary
+// entrypoint (main.rs) so it lives here in `output` rather than under `repl`.
 
 /// Strip terminal-unsafe characters from a string before printing.
 ///

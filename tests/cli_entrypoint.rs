@@ -264,12 +264,12 @@ fn multi_instruction_dockerfile_with_eof_stdin_exits_zero() {
     );
 }
 
-// ── test 10: --stage flag emits a "not yet implemented" warning ──────────────
+// ── test 10: --stage flag exits 1 with a clear "not yet implemented" error ───
 
 #[test]
-fn stage_flag_emits_not_implemented_warning() {
-    // `--stage` is parsed by clap but not yet wired to the engine. The CLI must
-    // emit a `warning:` to stderr so the flag is never a silent no-op.
+fn stage_flag_exits_one_with_not_implemented_error() {
+    // `--stage` is parsed by clap but not yet wired to the engine. To avoid
+    // silently showing the wrong stage, demu must exit 1 with a clear error.
     let dockerfile = temp_dockerfile("FROM scratch\n");
 
     let output = demu()
@@ -283,21 +283,25 @@ fn stage_flag_emits_not_implemented_warning() {
         .output()
         .expect("failed to run demu");
 
-    // The process must still exit 0 (the flag is ignored, not fatal).
-    assert!(
-        output.status.success(),
-        "--stage should not cause a fatal exit, got: {:?}",
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "--stage must exit 1, got: {:?}",
         output.status
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("warning:"),
-        "--stage must emit a 'warning:' line, got: {stderr}"
+        stderr.starts_with("demu:"),
+        "--stage error must begin with 'demu:', got: {stderr}"
     );
     assert!(
         stderr.contains("stage"),
-        "--stage warning must mention 'stage', got: {stderr}"
+        "--stage error must mention 'stage', got: {stderr}"
+    );
+    assert!(
+        stderr.contains("not yet implemented"),
+        "--stage error must say 'not yet implemented', got: {stderr}"
     );
 }
 

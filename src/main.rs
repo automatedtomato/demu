@@ -17,8 +17,8 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use demu::{
-    engine, parser::dockerfile::parse_dockerfile, repl::run_repl,
-    repl::sanitize::sanitize_for_terminal, Cli,
+    engine, output::sanitize::sanitize_for_terminal, parser::dockerfile::parse_dockerfile,
+    repl::run_repl, Cli,
 };
 
 /// Full CLI pipeline. Returns `Err` for any unrecoverable failure.
@@ -30,10 +30,14 @@ fn run_cli() -> Result<()> {
 
     // ── 0. Surface unimplemented flags early ─────────────────────────────────
 
-    // `--stage` is parsed by clap but not yet wired into the engine. Emit a
-    // warning so the user knows the flag was received but has no effect.
-    if cli.stage.is_some() {
-        eprintln!("warning: --stage is not yet implemented and will be ignored");
+    // `--stage` is parsed by clap but not yet wired into the engine. Fail
+    // explicitly so the user knows their stage selection will not be honoured —
+    // proceeding silently would show the wrong stage without any indication.
+    if let Some(stage) = &cli.stage {
+        anyhow::bail!(
+            "--stage is not yet implemented (requested stage: '{stage}'); \
+             omit it to preview the final stage"
+        );
     }
 
     // ── 1. Validate the path ─────────────────────────────────────────────────

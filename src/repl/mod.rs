@@ -10,7 +10,6 @@ pub mod custom;
 pub mod error;
 pub mod parse;
 pub mod path;
-pub mod sanitize;
 
 /// Placeholder struct kept for backward-compatibility with integration tests
 /// that were written against the initial module scaffold.
@@ -24,11 +23,11 @@ use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
 use crate::model::state::PreviewState;
+use crate::output::sanitize::sanitize_for_terminal;
 use crate::repl::commands::{cat, cd, env_cmd, find, help, ls, pwd};
 use crate::repl::custom::{history, layers};
 use crate::repl::error::ReplError;
 use crate::repl::parse::{parse_input, ParsedCommand};
-use crate::repl::sanitize::sanitize_for_terminal;
 
 /// Run the interactive REPL until the user exits.
 ///
