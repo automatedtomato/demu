@@ -2,7 +2,9 @@
 name = "demu"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"
 description = "Fast, non-destructive Docker/Compose preview shell"
+authors = ["automatedtomato"]
 license = "MIT"
 repository = "https://github.com/automatedtomato/demu"
 homepage = "https://github.com/automatedtomato/demu"
