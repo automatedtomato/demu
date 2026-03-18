@@ -6,6 +6,7 @@
 // and the `exit` command).
 
 pub mod commands;
+pub mod custom;
 pub mod error;
 pub mod parse;
 pub mod path;
@@ -23,6 +24,7 @@ use rustyline::DefaultEditor;
 
 use crate::model::state::PreviewState;
 use crate::repl::commands::{cat, cd, env_cmd, find, help, ls, pwd};
+use crate::repl::custom::{history, layers};
 use crate::repl::error::ReplError;
 use crate::repl::parse::{parse_input, ParsedCommand};
 
@@ -140,6 +142,12 @@ pub fn dispatch(
         }
         ParsedCommand::Find { path, name_pattern } => {
             find::execute(state, &path, name_pattern.as_deref(), writer)?;
+        }
+        ParsedCommand::Layers => {
+            layers::execute(state, writer)?;
+        }
+        ParsedCommand::History => {
+            history::execute(state, writer)?;
         }
         ParsedCommand::Exit => {
             return Ok(false);
@@ -345,5 +353,57 @@ mod tests {
             out.contains('d') || out.contains('-'),
             "long format must include type prefix, got: {out}"
         );
+    }
+
+    // --- :layers dispatch ---
+
+    #[test]
+    fn dispatch_layers_empty_state_prints_no_layers() {
+        let mut state = PreviewState::default();
+        let (cont, out) = dispatch_str(&mut state, ":layers").expect(":layers should succeed");
+        assert!(cont, ":layers must return true (keep REPL running)");
+        assert!(out.trim() == "No layers recorded.", "got: {out}");
+    }
+
+    #[test]
+    fn dispatch_layers_with_data_shows_layer_info() {
+        use crate::model::state::LayerSummary;
+
+        let mut state = PreviewState::default();
+        state.layers.push(LayerSummary {
+            instruction_type: "COPY".to_string(),
+            files_changed: vec![PathBuf::from("/app/main.rs")],
+            env_changed: vec![],
+        });
+        let (cont, out) = dispatch_str(&mut state, ":layers").expect(":layers should succeed");
+        assert!(cont);
+        assert!(out.contains("Layer 1"), "got: {out}");
+        assert!(out.contains("COPY"), "got: {out}");
+    }
+
+    // --- :history dispatch ---
+
+    #[test]
+    fn dispatch_history_empty_state_prints_no_history() {
+        let mut state = PreviewState::default();
+        let (cont, out) = dispatch_str(&mut state, ":history").expect(":history should succeed");
+        assert!(cont, ":history must return true (keep REPL running)");
+        assert!(out.trim() == "No history recorded.", "got: {out}");
+    }
+
+    #[test]
+    fn dispatch_history_with_data_shows_entry_info() {
+        use crate::model::state::HistoryEntry;
+
+        let mut state = PreviewState::default();
+        state.history.push(HistoryEntry {
+            line: 5,
+            instruction: "RUN echo hello".to_string(),
+            effect: "simulated shell command".to_string(),
+        });
+        let (cont, out) = dispatch_str(&mut state, ":history").expect(":history should succeed");
+        assert!(cont);
+        assert!(out.contains("RUN echo hello"), "got: {out}");
+        assert!(out.contains("simulated shell command"), "got: {out}");
     }
 }

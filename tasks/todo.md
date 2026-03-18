@@ -6,8 +6,6 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 ## In progress
 
 ## Up next
-
-- [ ] [#6](https://github.com/automatedtomato/demu/issues/6) feat: REPL — custom inspection commands
 - [ ] [#7](https://github.com/automatedtomato/demu/issues/7) feat: CLI entrypoint
 - [ ] [#8](https://github.com/automatedtomato/demu/issues/8) test: integration fixtures for v0.1
 
@@ -21,3 +19,4 @@ Tracking issue: [#9](https://github.com/automatedtomato/demu/issues/9)
 - [x] [#3](https://github.com/automatedtomato/demu/issues/3) feat: Dockerfile parser (v0.1 subset)
 - [x] [#4](https://github.com/automatedtomato/demu/issues/4) feat: engine — apply instructions to PreviewState
 - [x] [#5](https://github.com/automatedtomato/demu/issues/5) feat: REPL — standard shell commands — merged [#14](https://github.com/automatedtomato/demu/pull/14)
+- [x] [#6](https://github.com/automatedtomato/demu/issues/6) feat: REPL — custom inspection commands (`:layers`, `:history`)
