@@ -1,0 +1,4 @@
+FROM alpine:3.18
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV APP_NAME my-app
