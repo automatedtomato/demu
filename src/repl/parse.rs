@@ -38,6 +38,10 @@ pub enum ParsedCommand {
     Exit,
     /// `help` — display command reference.
     Help,
+    /// `:layers` — display a layer-by-layer summary of changes.
+    Layers,
+    /// `:history` — display the instruction history timeline.
+    History,
     /// The input was empty or only whitespace.
     Empty,
     /// The input did not match any known command.
@@ -75,6 +79,9 @@ pub fn parse_input(line: &str) -> ParsedCommand {
         "env" => ParsedCommand::Env,
         "exit" | "quit" => ParsedCommand::Exit,
         "help" => ParsedCommand::Help,
+        // Colon-prefixed custom inspection commands.
+        ":layers" => ParsedCommand::Layers,
+        ":history" => ParsedCommand::History,
         _ => ParsedCommand::Unknown {
             input: trimmed.to_string(),
         },
@@ -444,6 +451,75 @@ mod tests {
             parse_input("LS"),
             ParsedCommand::Unknown {
                 input: "LS".to_string()
+            }
+        );
+    }
+
+    // --- :layers ---
+
+    #[test]
+    fn layers_bare_returns_layers() {
+        assert_eq!(parse_input(":layers"), ParsedCommand::Layers);
+    }
+
+    #[test]
+    fn layers_with_trailing_whitespace_returns_layers() {
+        assert_eq!(parse_input(":layers  "), ParsedCommand::Layers);
+    }
+
+    #[test]
+    fn layers_uppercase_is_unknown() {
+        // Custom commands are case-sensitive — :LAYERS is not :layers.
+        assert_eq!(
+            parse_input(":LAYERS"),
+            ParsedCommand::Unknown {
+                input: ":LAYERS".to_string()
+            }
+        );
+    }
+
+    // --- :history ---
+
+    #[test]
+    fn history_bare_returns_history() {
+        assert_eq!(parse_input(":history"), ParsedCommand::History);
+    }
+
+    #[test]
+    fn history_with_trailing_whitespace_returns_history() {
+        assert_eq!(parse_input(":history  "), ParsedCommand::History);
+    }
+
+    #[test]
+    fn history_uppercase_is_unknown() {
+        assert_eq!(
+            parse_input(":HISTORY"),
+            ParsedCommand::Unknown {
+                input: ":HISTORY".to_string()
+            }
+        );
+    }
+
+    // --- Unimplemented colon commands are unknown ---
+
+    #[test]
+    fn explain_is_unknown() {
+        // :explain is not yet dispatched — must be unknown.
+        assert_eq!(
+            parse_input(":explain /app/main.rs"),
+            ParsedCommand::Unknown {
+                input: ":explain /app/main.rs".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn installed_is_unknown() {
+        // :installed is not yet dispatched — must be unknown.
+        assert_eq!(
+            parse_input(":installed"),
+            ParsedCommand::Unknown {
+                input: ":installed".to_string()
             }
         );
     }
