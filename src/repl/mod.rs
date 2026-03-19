@@ -6,6 +6,7 @@
 // and the `exit` command).
 
 pub mod commands;
+pub mod config;
 pub mod custom;
 pub mod error;
 pub mod parse;
@@ -25,7 +26,8 @@ use rustyline::DefaultEditor;
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
 use crate::repl::commands::{apt, cat, cd, env_cmd, find, help, ls, pip, pwd, which};
-use crate::repl::custom::{history, installed, layers};
+use crate::repl::config::ReplConfig;
+use crate::repl::custom::{history, installed, layers, reload};
 use crate::repl::error::ReplError;
 use crate::repl::parse::{parse_input, ParsedCommand};
 
@@ -34,11 +36,13 @@ use crate::repl::parse::{parse_input, ParsedCommand};
 /// The REPL:
 /// - Displays a dynamic prompt showing the current working directory.
 /// - Parses each input line into a [`ParsedCommand`].
-/// - Dispatches to the appropriate command handler.
+/// - Handles `:reload` inline before calling `dispatch` (because reload needs
+///   access to `config` and both stdout and stderr writers simultaneously).
+/// - Dispatches all other commands to [`dispatch`].
 /// - Prints errors from handlers as compact terminal messages (non-fatal).
 /// - Exits gracefully on Ctrl-D, `exit`, or `quit`.
 /// - Continues on Ctrl-C (prints a hint on how to exit).
-pub fn run_repl(state: &mut PreviewState) -> anyhow::Result<()> {
+pub fn run_repl(state: &mut PreviewState, config: &ReplConfig) -> anyhow::Result<()> {
     let mut editor = DefaultEditor::new()?;
     let stdout = io::stdout();
 
@@ -58,6 +62,19 @@ pub fn run_repl(state: &mut PreviewState) -> anyhow::Result<()> {
 
                 let cmd = parse_input(&line);
                 let mut out = stdout.lock();
+
+                // `:reload` is handled before dispatch because it requires
+                // both a stdout writer and a stderr writer simultaneously, and
+                // it also needs the session-level `config`. It is intentionally
+                // NOT part of `dispatch` — see the comment in `dispatch` below.
+                if cmd == ParsedCommand::Reload {
+                    let mut err_out = io::stderr();
+                    if let Err(e) = reload::execute(state, config, &mut out, &mut err_out) {
+                        let safe = sanitize_for_terminal(&e.to_string());
+                        eprintln!("{safe}");
+                    }
+                    continue;
+                }
 
                 match dispatch(state, cmd, &mut out) {
                     // `exit` / `quit` — terminate the loop cleanly.
@@ -101,6 +118,11 @@ pub fn run_repl(state: &mut PreviewState) -> anyhow::Result<()> {
 ///
 /// Returns `Ok(true)` normally or `Ok(false)` when the command signals exit.
 /// The caller is responsible for exiting the loop on `Exit`.
+///
+/// Note: `ParsedCommand::Reload` is intentionally NOT handled here. It is
+/// intercepted in `run_repl` before this function is called, because reload
+/// needs access to both stdout and stderr writers as well as the session-level
+/// `ReplConfig`. This design avoids threading config through dispatch.
 pub fn dispatch(
     state: &mut PreviewState,
     cmd: ParsedCommand,
@@ -154,6 +176,11 @@ pub fn dispatch(
         }
         ParsedCommand::Unknown { input } => {
             return Err(ReplError::UnknownCommand { input });
+        }
+        // Reload is intercepted in `run_repl` before `dispatch` is called.
+        // Reaching this arm indicates a programming error in the REPL loop.
+        ParsedCommand::Reload => {
+            unreachable!(":reload must be handled in run_repl before dispatch is called");
         }
     }
 
@@ -555,6 +582,18 @@ mod tests {
             matches!(result, Err(ReplError::UnknownCommand { .. })),
             "bare 'pip' must return UnknownCommand; got: {result:?}"
         );
+    }
+
+    // --- :reload parse layer ---
+    //
+    // `:reload` is intercepted in `run_repl` before `dispatch` is called, so
+    // `dispatch` will never see it in normal operation (it panics via
+    // `unreachable!` if it does). The parse-layer test below is sufficient to
+    // confirm that the parser recognises the command correctly.
+
+    #[test]
+    fn reload_is_recognized_by_parse_input() {
+        assert_eq!(parse_input(":reload"), ParsedCommand::Reload);
     }
 
     // --- :history dispatch ---

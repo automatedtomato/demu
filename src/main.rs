@@ -18,7 +18,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use demu::{
     engine, output::sanitize::sanitize_for_terminal, parser::dockerfile::parse_dockerfile,
-    repl::run_repl, Cli,
+    repl::config::ReplConfig, repl::run_repl, Cli,
 };
 
 /// Full CLI pipeline. Returns `Err` for any unrecoverable failure.
@@ -103,7 +103,11 @@ fn run_cli() -> Result<()> {
 
     // ── 7. Enter the interactive REPL ────────────────────────────────────────
 
-    run_repl(&mut state)?;
+    // Build the session-level config that the REPL needs for `:reload`.
+    // The canonical path and context_dir are already computed above.
+    let repl_config = ReplConfig::new(canonical);
+
+    run_repl(&mut state, &repl_config)?;
 
     Ok(())
 }

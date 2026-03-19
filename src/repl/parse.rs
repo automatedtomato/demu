@@ -56,6 +56,8 @@ pub enum ParsedCommand {
     },
     /// `pip list` — list simulated pip packages.
     PipList,
+    /// `:reload` — re-read and re-process the Dockerfile.
+    Reload,
     /// The input was empty or only whitespace.
     Empty,
     /// The input did not match any known command.
@@ -101,6 +103,7 @@ pub fn parse_input(line: &str) -> ParsedCommand {
         ":layers" => ParsedCommand::Layers,
         ":history" => ParsedCommand::History,
         ":installed" => ParsedCommand::Installed,
+        ":reload" => ParsedCommand::Reload,
         _ => ParsedCommand::Unknown {
             input: trimmed.to_string(),
         },
@@ -748,6 +751,29 @@ mod tests {
             parse_input("WHICH curl"),
             ParsedCommand::Unknown {
                 input: "WHICH curl".to_string()
+            }
+        );
+    }
+
+    // --- :reload ---
+
+    #[test]
+    fn reload_bare_returns_reload() {
+        assert_eq!(parse_input(":reload"), ParsedCommand::Reload);
+    }
+
+    #[test]
+    fn reload_with_trailing_whitespace_returns_reload() {
+        assert_eq!(parse_input(":reload  "), ParsedCommand::Reload);
+    }
+
+    #[test]
+    fn reload_uppercase_is_unknown() {
+        // Custom commands are case-sensitive — :RELOAD is not :reload.
+        assert_eq!(
+            parse_input(":RELOAD"),
+            ParsedCommand::Unknown {
+                input: ":RELOAD".to_string()
             }
         );
     }
