@@ -28,18 +28,6 @@ use demu::{
 fn run_cli() -> Result<()> {
     let cli = Cli::parse();
 
-    // ── 0. Surface unimplemented flags early ─────────────────────────────────
-
-    // `--stage` is parsed by clap but not yet wired into the engine. Fail
-    // explicitly so the user knows their stage selection will not be honoured —
-    // proceeding silently would show the wrong stage without any indication.
-    if let Some(stage) = &cli.stage {
-        anyhow::bail!(
-            "--stage is not yet implemented (requested stage: '{stage}'); \
-             omit it to preview the final stage"
-        );
-    }
-
     // ── 1. Validate the path ─────────────────────────────────────────────────
 
     // The path must exist — surface a clear error rather than a confusing I/O
@@ -87,8 +75,25 @@ fn run_cli() -> Result<()> {
 
     // ── 5. Run the engine ────────────────────────────────────────────────────
 
-    let mut state = engine::run(instructions, &context_dir)
+    let output = engine::run(instructions, &context_dir)
         .with_context(|| format!("engine error while processing '{}'", canonical.display()))?;
+
+    // ── 5a. Select the target stage ──────────────────────────────────────────
+
+    // If `--stage` is provided, look it up in the registry (by name or numeric
+    // index). If omitted, use the final stage returned directly by the engine.
+    let mut state = if let Some(ref stage_name) = cli.stage {
+        output.stages.get(stage_name).cloned().ok_or_else(|| {
+            let available = output.stages.keys().join(", ");
+            anyhow::anyhow!(
+                "stage '{}' not found; available stages: {}",
+                stage_name,
+                available
+            )
+        })?
+    } else {
+        output.state
+    };
 
     // ── 6. Print warnings to stderr ──────────────────────────────────────────
 

@@ -65,8 +65,10 @@ pub fn execute(
     };
 
     // Step 3: Run the engine against the parsed instructions.
+    // `:reload` always restores the final stage — multi-stage selection
+    // via `--stage` is only applied once at startup, not on reload.
     let new_state = match engine::run(instructions, &config.context_dir) {
-        Ok(s) => s,
+        Ok(output) => output.state,
         Err(e) => {
             let safe_msg = sanitize_for_terminal(&e.to_string());
             writeln!(err_writer, "demu: engine error: {safe_msg}")

@@ -11,6 +11,73 @@ use std::path::PathBuf;
 use super::fs::VirtualFs;
 use super::warning::Warning;
 
+/// A registry of all completed build stages, indexed by name and by number.
+///
+/// Each stage is stored under two keys: its alias (e.g. `"builder"`) and its
+/// zero-based numeric index as a string (e.g. `"0"`, `"1"`). Stages without
+/// an alias are stored only by numeric index.
+///
+/// Uses `BTreeMap` for deterministic key ordering in tests and output.
+#[derive(Debug, Clone, Default)]
+pub struct StageRegistry {
+    /// Map from stage key (numeric index string or alias) to `PreviewState`.
+    ///
+    /// An aliased stage is stored under both its numeric index and its alias.
+    /// Numeric-only stages are stored only under their index string.
+    stages: BTreeMap<String, PreviewState>,
+}
+
+impl StageRegistry {
+    /// Insert a completed stage.
+    ///
+    /// Always stores the stage by `index` (as a string). Also stores it by
+    /// `alias` when `alias` is `Some`. If the alias key already exists, it
+    /// is overwritten (last-write wins, matching Dockerfile semantics where
+    /// two stages with the same alias is an error — we just handle it gracefully).
+    pub fn insert(&mut self, index: usize, alias: Option<&str>, state: PreviewState) {
+        // Store by numeric index first. The clone is needed when we also store by alias.
+        let index_key = index.to_string();
+        if let Some(alias_str) = alias {
+            // Insert under the alias key, cloning state so the index key can own it too.
+            self.stages.insert(alias_str.to_string(), state.clone());
+            self.stages.insert(index_key, state);
+        } else {
+            self.stages.insert(index_key, state);
+        }
+    }
+
+    /// Look up a stage by name or numeric index string.
+    ///
+    /// Returns `None` when no stage matches `key`.
+    pub fn get(&self, key: &str) -> Option<&PreviewState> {
+        self.stages.get(key)
+    }
+
+    /// Return a sorted list of all stage keys (aliases and numeric indices).
+    ///
+    /// The list is sorted lexicographically because the underlying store is a `BTreeMap`.
+    pub fn keys(&self) -> Vec<String> {
+        self.stages.keys().cloned().collect()
+    }
+
+    /// Return the total number of unique stages stored (by numeric index).
+    ///
+    /// Stages stored under both alias and index count as one stage.
+    /// This counts only the numeric-index keys (pure digits), which represent
+    /// unique stages regardless of how many aliases they have.
+    pub fn len(&self) -> usize {
+        self.stages
+            .keys()
+            .filter(|k| k.parse::<usize>().is_ok())
+            .count()
+    }
+
+    /// Return `true` when no stages have been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 /// Registry of packages that the simulation has recorded as installed.
 ///
 /// Uses `BTreeSet` for each manager so that `list()` always returns packages
@@ -397,6 +464,107 @@ mod tests {
         reg.record("npm", "requests".to_string());
         reg.record("pip", "requests".to_string());
         assert_eq!(reg.which_prefix("requests"), Some("/usr/local/bin"));
+    }
+
+    // --- StageRegistry ---
+
+    #[test]
+    fn stage_registry_is_empty_on_default() {
+        let reg = StageRegistry::default();
+        assert!(reg.is_empty());
+        assert_eq!(reg.len(), 0);
+    }
+
+    #[test]
+    fn stage_registry_is_not_empty_after_insert() {
+        let mut reg = StageRegistry::default();
+        reg.insert(0, None, PreviewState::default());
+        assert!(!reg.is_empty());
+    }
+
+    #[test]
+    fn stage_registry_insert_by_index_only_when_no_alias() {
+        let mut reg = StageRegistry::default();
+        reg.insert(0, None, PreviewState::default());
+        // Should be retrievable by index string "0".
+        assert!(reg.get("0").is_some());
+        // Should NOT be stored under any alias key (only numeric key exists).
+        assert_eq!(reg.keys(), vec!["0"]);
+    }
+
+    #[test]
+    fn stage_registry_insert_by_index_and_alias() {
+        let mut reg = StageRegistry::default();
+        let mut s = PreviewState::default();
+        s.env.insert("KEY".to_string(), "val".to_string());
+        reg.insert(0, Some("builder"), s);
+        // Should be stored under both "0" and "builder".
+        assert!(reg.get("0").is_some());
+        assert!(reg.get("builder").is_some());
+    }
+
+    #[test]
+    fn stage_registry_get_by_index_string() {
+        let mut reg = StageRegistry::default();
+        let mut s = PreviewState::default();
+        s.env.insert("STAGE".to_string(), "zero".to_string());
+        reg.insert(0, None, s);
+        let retrieved = reg.get("0").expect("stage 0 must exist");
+        assert_eq!(retrieved.env.get("STAGE").map(String::as_str), Some("zero"));
+    }
+
+    #[test]
+    fn stage_registry_get_by_alias() {
+        let mut reg = StageRegistry::default();
+        let mut s = PreviewState::default();
+        s.env.insert("WHO".to_string(), "builder".to_string());
+        reg.insert(1, Some("builder"), s);
+        let retrieved = reg.get("builder").expect("stage 'builder' must exist");
+        assert_eq!(
+            retrieved.env.get("WHO").map(String::as_str),
+            Some("builder")
+        );
+    }
+
+    #[test]
+    fn stage_registry_get_returns_none_for_unknown_key() {
+        let reg = StageRegistry::default();
+        assert!(reg.get("nonexistent").is_none());
+        assert!(reg.get("99").is_none());
+    }
+
+    #[test]
+    fn stage_registry_keys_returns_sorted_keys() {
+        let mut reg = StageRegistry::default();
+        reg.insert(0, Some("builder"), PreviewState::default());
+        reg.insert(1, Some("runner"), PreviewState::default());
+        let keys = reg.keys();
+        // BTreeMap gives lexicographic order: "0", "1", "builder", "runner"
+        assert_eq!(keys, vec!["0", "1", "builder", "runner"]);
+    }
+
+    #[test]
+    fn stage_registry_len_counts_unique_stages_by_index() {
+        let mut reg = StageRegistry::default();
+        // Insert two stages: one with alias, one without.
+        reg.insert(0, Some("builder"), PreviewState::default());
+        reg.insert(1, None, PreviewState::default());
+        // len() counts by numeric index keys only → 2 unique stages.
+        assert_eq!(reg.len(), 2);
+    }
+
+    #[test]
+    fn stage_registry_alias_and_index_share_same_state() {
+        let mut reg = StageRegistry::default();
+        let mut s = PreviewState::default();
+        s.cwd = PathBuf::from("/build");
+        reg.insert(0, Some("builder"), s);
+        // Both keys should reflect the same cwd.
+        assert_eq!(reg.get("0").expect("by index").cwd, PathBuf::from("/build"));
+        assert_eq!(
+            reg.get("builder").expect("by alias").cwd,
+            PathBuf::from("/build")
+        );
     }
 
     // --- Clone ---

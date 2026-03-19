@@ -1,8 +1,13 @@
 // Main engine runner that applies a sequence of instructions to a PreviewState.
 //
 // The single public entry point `run` walks a `Vec<Instruction>` and returns
-// a fully-populated `PreviewState`. Each instruction produces a `LayerSummary`
-// and a `HistoryEntry` that describe what changed.
+// an `EngineOutput` that contains:
+//   - the final stage's `PreviewState` (ready for the REPL)
+//   - a `StageRegistry` with all completed stages indexed by numeric index and alias
+//
+// Multi-stage builds (multiple FROM instructions) are handled by saving the
+// current state into the registry each time a new FROM is encountered. The final
+// stage is inserted into the registry after the loop and also returned as `state`.
 //
 // Recoverable conditions (missing COPY sources, unmodeled RUN commands,
 // unsupported instructions) become `Warning`s in `PreviewState`. Only
@@ -14,26 +19,46 @@ use crate::model::{
     fs::{DirNode, FsNode},
     instruction::Instruction,
     provenance::{Provenance, ProvenanceSource},
-    state::{HistoryEntry, LayerSummary, PreviewState},
+    state::{HistoryEntry, LayerSummary, PreviewState, StageRegistry},
     warning::Warning,
 };
 
 use super::{copy, EngineError};
 
+/// The output produced by a full engine run over a Dockerfile instruction list.
+///
+/// `state` is the final stage's `PreviewState`, which is the default target for
+/// the REPL. `stages` is the `StageRegistry` that maps every stage (by numeric
+/// index and optional alias) to its `PreviewState`, enabling `--stage` selection.
+pub struct EngineOutput {
+    /// The final (last) stage's `PreviewState`, ready for the REPL.
+    pub state: PreviewState,
+    /// All completed stages, indexed by numeric index string and by alias (if any).
+    pub stages: StageRegistry,
+}
+
 /// Run a sequence of Dockerfile instructions against a fresh `PreviewState`.
+///
+/// Supports multi-stage builds: each `FROM` instruction after the first saves
+/// the current stage into the `StageRegistry` before starting a new one.
 ///
 /// # Parameters
 /// - `instructions` — the parsed instruction list to execute in order
 /// - `context_dir`  — the host build context directory for COPY operations
 ///
 /// # Returns
-/// The populated `PreviewState`, or an `EngineError` for unrecoverable I/O
-/// failures.
+/// An `EngineOutput` containing the final stage state and the full registry,
+/// or an `EngineError` for unrecoverable I/O failures.
 pub fn run(
     instructions: Vec<Instruction>,
     context_dir: &Path,
-) -> Result<PreviewState, EngineError> {
+) -> Result<EngineOutput, EngineError> {
     let mut state = PreviewState::default();
+    let mut registry = StageRegistry::default();
+    // Tracks how many FROM instructions have been processed (0-based stage index).
+    let mut stage_index: usize = 0;
+    // Current stage alias, updated on each FROM … AS <alias> instruction.
+    let mut current_alias: Option<String> = None;
 
     for (idx, instruction) in instructions.into_iter().enumerate() {
         // Use index+1 as a line proxy; real line numbers are a follow-up task.
@@ -41,6 +66,17 @@ pub fn run(
 
         let (raw_text, effect, layer) = match &instruction {
             Instruction::From { image, alias } => {
+                // Multi-stage support: if a stage is already in progress (either
+                // this is not the first FROM, or the current state has history),
+                // save it to the registry before resetting for the new stage.
+                if stage_index > 0 || !state.history.is_empty() {
+                    registry.insert(stage_index, current_alias.as_deref(), state);
+                    stage_index += 1;
+                    state = PreviewState::default();
+                }
+                // Update alias tracking for the new stage.
+                current_alias = alias.clone();
+
                 // FROM establishes the base image. Since we do not model image
                 // content yet, we emit an EmptyBaseImage warning and set the
                 // active stage alias if present.
@@ -125,7 +161,15 @@ pub fn run(
         state.layers.push(layer);
     }
 
-    Ok(state)
+    // Insert the final stage into the registry so `--stage <index>` and
+    // `--stage <alias>` can select it. The final state is also returned
+    // directly as `EngineOutput::state` for the default REPL path.
+    registry.insert(stage_index, current_alias.as_deref(), state.clone());
+
+    Ok(EngineOutput {
+        state,
+        stages: registry,
+    })
 }
 
 /// Apply a `WORKDIR` instruction: update `state.cwd` and ensure the directory
@@ -197,7 +241,7 @@ mod tests {
     #[test]
     fn empty_instructions_returns_default_state() {
         let ctx = empty_context();
-        let state = run(vec![], ctx.path()).expect("run");
+        let state = run(vec![], ctx.path()).expect("run").state;
 
         assert_eq!(state.cwd, PathBuf::from("/"));
         assert!(state.env.is_empty());
@@ -218,7 +262,8 @@ mod tests {
             }],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert_eq!(state.active_stage, Some("builder".to_string()));
         assert!(
@@ -242,7 +287,8 @@ mod tests {
             }],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert!(state.active_stage.is_none());
     }
@@ -258,7 +304,8 @@ mod tests {
             }],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert_eq!(state.cwd, PathBuf::from("/app"));
         assert!(
@@ -283,7 +330,8 @@ mod tests {
             ],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert_eq!(state.cwd, PathBuf::from("/opt/sub"));
     }
@@ -299,7 +347,8 @@ mod tests {
             }],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert!(state.fs.contains(Path::new("/a")), "/a must exist");
         assert!(state.fs.contains(Path::new("/a/b")), "/a/b must exist");
@@ -318,7 +367,8 @@ mod tests {
             }],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert_eq!(state.env.get("KEY"), Some(&"value".to_string()));
     }
@@ -335,7 +385,8 @@ mod tests {
             }],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         let layer = &state.layers[0];
         assert!(
@@ -357,7 +408,8 @@ mod tests {
             }],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert!(
             state
@@ -379,7 +431,8 @@ mod tests {
             }],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert!(
             state
@@ -411,7 +464,7 @@ mod tests {
                 command: "true".to_string(),
             },
         ];
-        let state = run(instrs, ctx.path()).expect("run");
+        let state = run(instrs, ctx.path()).expect("run").state;
         assert_eq!(state.history.len(), 4);
     }
 
@@ -436,7 +489,7 @@ mod tests {
                 command: "true".to_string(),
             },
         ];
-        let state = run(instrs, ctx.path()).expect("run");
+        let state = run(instrs, ctx.path()).expect("run").state;
         assert_eq!(state.layers.len(), 4);
     }
 
@@ -462,7 +515,8 @@ mod tests {
             ],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert_eq!(state.env.get("A"), Some(&"1".to_string()));
         assert_eq!(state.env.get("B"), Some(&"2".to_string()));
@@ -481,7 +535,8 @@ mod tests {
             }],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         let node = state.fs.get(Path::new("/app/hello.txt")).expect("file");
         match node {
@@ -507,11 +562,261 @@ mod tests {
             ],
             ctx.path(),
         )
-        .expect("run");
+        .expect("run")
+        .state;
 
         assert!(
             state.fs.contains(Path::new("/app/output/data.txt")),
             "relative COPY dest must resolve against cwd"
+        );
+    }
+
+    // ── multi-stage tests ─────────────────────────────────────────────────
+
+    // ── test 16: single FROM produces one stage in registry ──────────────
+
+    #[test]
+    fn single_from_produces_one_stage_in_registry() {
+        let ctx = empty_context();
+        let output = run(
+            vec![Instruction::From {
+                image: "scratch".to_string(),
+                alias: None,
+            }],
+            ctx.path(),
+        )
+        .expect("run");
+
+        assert_eq!(output.stages.len(), 1, "one FROM → one stage in registry");
+        assert!(
+            output.stages.get("0").is_some(),
+            "stage must be stored under index '0'"
+        );
+    }
+
+    // ── test 17: two FROMs produce two stages ─────────────────────────────
+
+    #[test]
+    fn two_from_produces_two_stages() {
+        let ctx = empty_context();
+        let output = run(
+            vec![
+                Instruction::From {
+                    image: "scratch".to_string(),
+                    alias: None,
+                },
+                Instruction::From {
+                    image: "alpine".to_string(),
+                    alias: None,
+                },
+            ],
+            ctx.path(),
+        )
+        .expect("run");
+
+        assert_eq!(output.stages.len(), 2, "two FROMs → two stages");
+        assert!(output.stages.get("0").is_some(), "stage '0' must exist");
+        assert!(output.stages.get("1").is_some(), "stage '1' must exist");
+    }
+
+    // ── test 18: named stage stored by alias and index ────────────────────
+
+    #[test]
+    fn named_stage_stored_by_alias_and_index() {
+        let ctx = empty_context();
+        let output = run(
+            vec![Instruction::From {
+                image: "scratch".to_string(),
+                alias: Some("builder".to_string()),
+            }],
+            ctx.path(),
+        )
+        .expect("run");
+
+        // Must be accessible by both "0" and "builder".
+        assert!(
+            output.stages.get("0").is_some(),
+            "named stage must be stored under numeric index '0'"
+        );
+        assert!(
+            output.stages.get("builder").is_some(),
+            "named stage must be stored under alias 'builder'"
+        );
+    }
+
+    // ── test 19: unnamed stages stored by index only ──────────────────────
+
+    #[test]
+    fn unnamed_stages_stored_by_index_only() {
+        let ctx = empty_context();
+        let output = run(
+            vec![
+                Instruction::From {
+                    image: "scratch".to_string(),
+                    alias: None,
+                },
+                Instruction::From {
+                    image: "alpine".to_string(),
+                    alias: None,
+                },
+            ],
+            ctx.path(),
+        )
+        .expect("run");
+
+        let keys = output.stages.keys();
+        // Only numeric keys should be present (no alias keys).
+        assert!(keys.contains(&"0".to_string()), "key '0' must exist");
+        assert!(keys.contains(&"1".to_string()), "key '1' must exist");
+        assert_eq!(keys.len(), 2, "no alias keys should be present");
+    }
+
+    // ── test 20: each stage has independent filesystem ────────────────────
+    //
+    // Files added in stage 0 (via WORKDIR) must NOT appear in stage 1.
+
+    #[test]
+    fn each_stage_has_independent_fs() {
+        let ctx = empty_context();
+        let output = run(
+            vec![
+                Instruction::From {
+                    image: "scratch".to_string(),
+                    alias: None,
+                },
+                // Stage 0: create /stage0-dir
+                Instruction::Workdir {
+                    path: PathBuf::from("/stage0-dir"),
+                },
+                // Stage 1 starts here
+                Instruction::From {
+                    image: "alpine".to_string(),
+                    alias: None,
+                },
+                // Stage 1: create /stage1-dir
+                Instruction::Workdir {
+                    path: PathBuf::from("/stage1-dir"),
+                },
+            ],
+            ctx.path(),
+        )
+        .expect("run");
+
+        let stage0 = output.stages.get("0").expect("stage 0");
+        let stage1 = output.stages.get("1").expect("stage 1");
+
+        // Stage 0 has /stage0-dir but not /stage1-dir.
+        assert!(
+            stage0.fs.contains(Path::new("/stage0-dir")),
+            "stage 0 must contain /stage0-dir"
+        );
+        assert!(
+            !stage0.fs.contains(Path::new("/stage1-dir")),
+            "stage 0 must NOT contain /stage1-dir"
+        );
+
+        // Stage 1 has /stage1-dir but not /stage0-dir.
+        assert!(
+            stage1.fs.contains(Path::new("/stage1-dir")),
+            "stage 1 must contain /stage1-dir"
+        );
+        assert!(
+            !stage1.fs.contains(Path::new("/stage0-dir")),
+            "stage 1 must NOT contain /stage0-dir"
+        );
+    }
+
+    // ── test 21: each stage has independent env ───────────────────────────
+    //
+    // ENV vars set in stage 0 must not appear in stage 1's env.
+
+    #[test]
+    fn each_stage_has_independent_env() {
+        let ctx = empty_context();
+        let output = run(
+            vec![
+                Instruction::From {
+                    image: "scratch".to_string(),
+                    alias: None,
+                },
+                Instruction::Env {
+                    key: "STAGE0_VAR".to_string(),
+                    value: "hello".to_string(),
+                },
+                Instruction::From {
+                    image: "alpine".to_string(),
+                    alias: None,
+                },
+                Instruction::Env {
+                    key: "STAGE1_VAR".to_string(),
+                    value: "world".to_string(),
+                },
+            ],
+            ctx.path(),
+        )
+        .expect("run");
+
+        let stage0 = output.stages.get("0").expect("stage 0");
+        let stage1 = output.stages.get("1").expect("stage 1");
+
+        // Stage 0 has STAGE0_VAR, not STAGE1_VAR.
+        assert_eq!(
+            stage0.env.get("STAGE0_VAR").map(String::as_str),
+            Some("hello"),
+            "stage 0 must have STAGE0_VAR=hello"
+        );
+        assert!(
+            !stage0.env.contains_key("STAGE1_VAR"),
+            "stage 0 must NOT have STAGE1_VAR"
+        );
+
+        // Stage 1 has STAGE1_VAR, not STAGE0_VAR.
+        assert_eq!(
+            stage1.env.get("STAGE1_VAR").map(String::as_str),
+            Some("world"),
+            "stage 1 must have STAGE1_VAR=world"
+        );
+        assert!(
+            !stage1.env.contains_key("STAGE0_VAR"),
+            "stage 1 must NOT have STAGE0_VAR"
+        );
+    }
+
+    // ── test 22: final stage state equals last stage in registry ─────────
+
+    #[test]
+    fn final_stage_state_equals_last_stage_in_registry() {
+        let ctx = empty_context();
+        let output = run(
+            vec![
+                Instruction::From {
+                    image: "scratch".to_string(),
+                    alias: None,
+                },
+                Instruction::From {
+                    image: "alpine".to_string(),
+                    alias: None,
+                },
+                Instruction::Env {
+                    key: "FINAL".to_string(),
+                    value: "yes".to_string(),
+                },
+            ],
+            ctx.path(),
+        )
+        .expect("run");
+
+        // The last stage (index 1) must match output.state.
+        let last_in_registry = output.stages.get("1").expect("stage '1' must exist");
+        assert_eq!(
+            output.state.env.get("FINAL"),
+            last_in_registry.env.get("FINAL"),
+            "output.state env must match last stage in registry"
+        );
+        assert_eq!(
+            output.state.history.len(),
+            last_in_registry.history.len(),
+            "output.state history length must match last stage in registry"
         );
     }
 }
