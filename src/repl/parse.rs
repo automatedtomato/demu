@@ -49,6 +49,13 @@ pub enum ParsedCommand {
         /// The command name to look up. Empty string when no argument was given.
         cmd: String,
     },
+    /// `apt list [--installed]` — list simulated apt packages.
+    AptList {
+        /// Whether `--installed` flag was given.
+        installed: bool,
+    },
+    /// `pip list` — list simulated pip packages.
+    PipList,
     /// The input was empty or only whitespace.
     Empty,
     /// The input did not match any known command.
@@ -87,6 +94,8 @@ pub fn parse_input(line: &str) -> ParsedCommand {
         "exit" | "quit" => ParsedCommand::Exit,
         "help" => ParsedCommand::Help,
         // Standard commands with arguments.
+        "apt" => parse_apt(args, trimmed),
+        "pip" => parse_pip(args, trimmed),
         "which" => parse_which(args),
         // Colon-prefixed custom inspection commands.
         ":layers" => ParsedCommand::Layers,
@@ -178,6 +187,40 @@ fn parse_find(args: &[&str]) -> ParsedCommand {
     }
 
     ParsedCommand::Find { path, name_pattern }
+}
+
+/// Parse arguments for the `apt` command.
+///
+/// Only `apt list` and `apt list --installed` are modeled. All other `apt`
+/// sub-commands (install, update, upgrade, etc.) produce `Unknown` so the
+/// REPL can surface them as unsupported rather than silently ignoring them.
+///
+/// `trimmed` is the full trimmed input line, used for the `Unknown` variant.
+fn parse_apt(args: &[&str], trimmed: &str) -> ParsedCommand {
+    match args {
+        ["list", "--installed"] => ParsedCommand::AptList { installed: true },
+        ["list"] => ParsedCommand::AptList { installed: false },
+        // All other forms (bare apt, apt install, apt update, …) are unknown.
+        _ => ParsedCommand::Unknown {
+            input: trimmed.to_string(),
+        },
+    }
+}
+
+/// Parse arguments for the `pip` command.
+///
+/// Only `pip list` is modeled. All other `pip` sub-commands (install, freeze,
+/// show, etc.) produce `Unknown` so the REPL can surface them appropriately.
+///
+/// `trimmed` is the full trimmed input line, used for the `Unknown` variant.
+fn parse_pip(args: &[&str], trimmed: &str) -> ParsedCommand {
+    match args {
+        ["list"] => ParsedCommand::PipList,
+        // All other forms (bare pip, pip install, …) are unknown.
+        _ => ParsedCommand::Unknown {
+            input: trimmed.to_string(),
+        },
+    }
 }
 
 /// Parse arguments for the `which` command.
@@ -553,6 +596,127 @@ mod tests {
             parse_input(":INSTALLED"),
             ParsedCommand::Unknown {
                 input: ":INSTALLED".to_string()
+            }
+        );
+    }
+
+    // --- apt ---
+
+    #[test]
+    fn apt_list_installed_returns_apt_list_installed_true() {
+        assert_eq!(
+            parse_input("apt list --installed"),
+            ParsedCommand::AptList { installed: true }
+        );
+    }
+
+    #[test]
+    fn apt_list_returns_apt_list_installed_false() {
+        assert_eq!(
+            parse_input("apt list"),
+            ParsedCommand::AptList { installed: false }
+        );
+    }
+
+    #[test]
+    fn apt_bare_returns_unknown() {
+        assert_eq!(
+            parse_input("apt"),
+            ParsedCommand::Unknown {
+                input: "apt".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn apt_install_returns_unknown() {
+        assert_eq!(
+            parse_input("apt install curl"),
+            ParsedCommand::Unknown {
+                input: "apt install curl".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn apt_update_returns_unknown() {
+        assert_eq!(
+            parse_input("apt update"),
+            ParsedCommand::Unknown {
+                input: "apt update".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn apt_uppercase_is_unknown() {
+        // Commands are case-sensitive — APT is not apt.
+        assert_eq!(
+            parse_input("APT list --installed"),
+            ParsedCommand::Unknown {
+                input: "APT list --installed".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn apt_list_installed_with_extra_args_is_unknown() {
+        // Extra tokens after --installed are not recognised; the parser rejects
+        // to Unknown so the REPL surfaces an unsupported-command message.
+        assert_eq!(
+            parse_input("apt list --installed --verbose"),
+            ParsedCommand::Unknown {
+                input: "apt list --installed --verbose".to_string()
+            }
+        );
+    }
+
+    // --- pip ---
+
+    #[test]
+    fn pip_list_returns_pip_list() {
+        assert_eq!(parse_input("pip list"), ParsedCommand::PipList);
+    }
+
+    #[test]
+    fn pip_bare_returns_unknown() {
+        assert_eq!(
+            parse_input("pip"),
+            ParsedCommand::Unknown {
+                input: "pip".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn pip_install_returns_unknown() {
+        assert_eq!(
+            parse_input("pip install requests"),
+            ParsedCommand::Unknown {
+                input: "pip install requests".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn pip_uppercase_is_unknown() {
+        // Commands are case-sensitive — PIP is not pip.
+        assert_eq!(
+            parse_input("PIP list"),
+            ParsedCommand::Unknown {
+                input: "PIP list".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn pip_list_with_extra_flag_is_unknown() {
+        // `pip list --outdated` is not a modeled command; extra flags after
+        // `list` fall through to Unknown so the REPL surfaces the rejection.
+        assert_eq!(
+            parse_input("pip list --outdated"),
+            ParsedCommand::Unknown {
+                input: "pip list --outdated".to_string()
             }
         );
     }

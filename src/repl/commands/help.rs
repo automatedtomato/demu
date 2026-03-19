@@ -25,6 +25,8 @@ COMMANDS
   cat <path>               print file contents
   find <path> [-name pat]  search filesystem for files
   env                      print environment variables
+  apt list --installed     list simulated apt packages
+  pip list                 list simulated pip packages
   which <cmd>              show simulated binary path for a command
   help                     show this help message
   exit                     leave the REPL
@@ -111,5 +113,20 @@ mod tests {
         let state = PreviewState::default();
         let mut buf = Vec::new();
         assert!(execute(&state, &mut buf).is_ok());
+    }
+
+    // --- New commands from issue #23 ---
+
+    #[test]
+    fn help_contains_apt_list_installed() {
+        assert!(
+            run().contains("apt list --installed"),
+            "output must mention 'apt list --installed'"
+        );
+    }
+
+    #[test]
+    fn help_contains_pip_list() {
+        assert!(run().contains("pip list"), "output must mention 'pip list'");
     }
 }

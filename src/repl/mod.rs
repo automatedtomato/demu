@@ -24,7 +24,7 @@ use rustyline::DefaultEditor;
 
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
-use crate::repl::commands::{cat, cd, env_cmd, find, help, ls, pwd, which};
+use crate::repl::commands::{apt, cat, cd, env_cmd, find, help, ls, pip, pwd, which};
 use crate::repl::custom::{history, installed, layers};
 use crate::repl::error::ReplError;
 use crate::repl::parse::{parse_input, ParsedCommand};
@@ -136,6 +136,12 @@ pub fn dispatch(
         }
         ParsedCommand::Installed => {
             installed::execute(state, writer)?;
+        }
+        ParsedCommand::AptList { installed } => {
+            apt::execute(state, installed, writer)?;
+        }
+        ParsedCommand::PipList => {
+            pip::execute(state, writer)?;
         }
         ParsedCommand::Which { cmd } => {
             which::execute(state, &cmd, writer)?;
@@ -450,6 +456,105 @@ mod tests {
         let apt_pos = out.find("apt:").expect("apt line must exist");
         let pip_pos = out.find("pip:").expect("pip line must exist");
         assert!(apt_pos < pip_pos, "apt must appear before pip; got:\n{out}");
+    }
+
+    // --- apt list dispatch ---
+
+    #[test]
+    fn dispatch_apt_list_installed_empty_prints_listing() {
+        let mut state = PreviewState::default();
+        let (cont, out) = dispatch_str(&mut state, "apt list --installed").expect("should succeed");
+        assert!(
+            cont,
+            "apt list --installed must return true (keep REPL running)"
+        );
+        assert!(
+            out.contains("Listing..."),
+            "must contain 'Listing...'; got: {out}"
+        );
+        assert!(
+            out.contains("(no packages recorded)"),
+            "empty registry sentinel must appear; got: {out}"
+        );
+    }
+
+    #[test]
+    fn dispatch_apt_list_installed_with_packages() {
+        let mut state = PreviewState::default();
+        state.installed.record("apt", "curl".to_string());
+        let (cont, out) = dispatch_str(&mut state, "apt list --installed").expect("should succeed");
+        assert!(cont);
+        assert!(
+            out.contains("curl/simulated [installed,simulated]"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn dispatch_apt_list_without_installed_flag_prints_usage() {
+        let mut state = PreviewState::default();
+        let (cont, out) = dispatch_str(&mut state, "apt list").expect("should succeed");
+        assert!(cont);
+        assert!(
+            out.contains("Usage: apt list --installed"),
+            "must print usage when --installed flag omitted; got: {out}"
+        );
+    }
+
+    #[test]
+    fn dispatch_apt_bare_is_unknown() {
+        let mut state = PreviewState::default();
+        let result = dispatch_str(&mut state, "apt");
+        assert!(
+            matches!(result, Err(ReplError::UnknownCommand { .. })),
+            "bare 'apt' must return UnknownCommand; got: {result:?}"
+        );
+    }
+
+    // --- pip list dispatch ---
+
+    #[test]
+    fn dispatch_pip_list_empty_prints_header() {
+        let mut state = PreviewState::default();
+        let (cont, out) = dispatch_str(&mut state, "pip list").expect("should succeed");
+        assert!(cont, "pip list must return true (keep REPL running)");
+        assert!(
+            out.contains("Package    Version"),
+            "header missing; got: {out}"
+        );
+        assert!(
+            out.contains("---------- -------"),
+            "separator missing; got: {out}"
+        );
+        // No data rows should appear when registry is empty.
+        assert!(
+            !out.contains("(simulated)"),
+            "must not print data rows for empty registry; got: {out}"
+        );
+    }
+
+    #[test]
+    fn dispatch_pip_list_with_packages() {
+        let mut state = PreviewState::default();
+        state.installed.record("pip", "flask".to_string());
+        let (cont, out) = dispatch_str(&mut state, "pip list").expect("should succeed");
+        assert!(cont);
+        // Assert the combined, column-aligned row so a split-line regression
+        // would not pass. "flask" (5 chars) padded to 10 + 1 space = 6 spaces.
+        assert!(
+            out.contains("flask      (simulated)"),
+            "must show column-aligned row for flask; got: {out}"
+        );
+    }
+
+    #[test]
+    fn dispatch_pip_bare_is_unknown() {
+        let mut state = PreviewState::default();
+        let result = dispatch_str(&mut state, "pip");
+        assert!(
+            matches!(result, Err(ReplError::UnknownCommand { .. })),
+            "bare 'pip' must return UnknownCommand; got: {result:?}"
+        );
     }
 
     // --- :history dispatch ---
