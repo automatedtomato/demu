@@ -17,12 +17,8 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             ext: tar.gz
-          # Use the last Intel runner for x86_64 macOS to avoid implicit
-          # ARM→x86_64 cross-compilation dependency on the Xcode SDK layout.
-          - target: x86_64-apple-darwin
-            os: macos-13
-            ext: tar.gz
-          # aarch64 compiles natively on Apple Silicon runners.
+          # aarch64 compiles natively on Apple Silicon runners (macos-latest).
+          # Intel Mac users can run this binary via Rosetta 2.
           - target: aarch64-apple-darwin
             os: macos-latest
             ext: tar.gz

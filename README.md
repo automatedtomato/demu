@@ -33,8 +33,7 @@ Available targets:
 | Platform | File |
 |----------|------|
 | Linux x86_64 | `demu-*-x86_64-unknown-linux-gnu.tar.gz` |
-| macOS Apple Silicon | `demu-*-aarch64-apple-darwin.tar.gz` |
-| macOS Intel | `demu-*-x86_64-apple-darwin.tar.gz` |
+| macOS (Apple Silicon / Intel via Rosetta 2) | `demu-*-aarch64-apple-darwin.tar.gz` |
 | Windows x86_64 | `demu-*-x86_64-pc-windows-msvc.zip` |
 
 ### From source
