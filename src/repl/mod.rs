@@ -24,8 +24,8 @@ use rustyline::DefaultEditor;
 
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
-use crate::repl::commands::{cat, cd, env_cmd, find, help, ls, pwd};
-use crate::repl::custom::{history, layers};
+use crate::repl::commands::{cat, cd, env_cmd, find, help, ls, pwd, which};
+use crate::repl::custom::{history, installed, layers};
 use crate::repl::error::ReplError;
 use crate::repl::parse::{parse_input, ParsedCommand};
 
@@ -133,6 +133,12 @@ pub fn dispatch(
         }
         ParsedCommand::History => {
             history::execute(state, writer)?;
+        }
+        ParsedCommand::Installed => {
+            installed::execute(state, writer)?;
+        }
+        ParsedCommand::Which { cmd } => {
+            which::execute(state, &cmd, writer)?;
         }
         ParsedCommand::Exit => {
             return Ok(false);
@@ -364,6 +370,86 @@ mod tests {
         assert!(cont);
         assert!(out.contains("Layer 1"), "got: {out}");
         assert!(out.contains("COPY"), "got: {out}");
+    }
+
+    // --- :installed dispatch ---
+
+    #[test]
+    fn dispatch_installed_empty_state_prints_no_packages() {
+        let mut state = PreviewState::default();
+        let (cont, out) =
+            dispatch_str(&mut state, ":installed").expect(":installed should succeed");
+        assert!(cont, ":installed must return true (keep REPL running)");
+        assert_eq!(out.trim(), "No packages recorded.", "got: {out}");
+    }
+
+    #[test]
+    fn dispatch_installed_with_packages_shows_manager_line() {
+        let mut state = PreviewState::default();
+        state.installed.record("apt", "curl".to_string());
+        let (cont, out) =
+            dispatch_str(&mut state, ":installed").expect(":installed should succeed");
+        assert!(cont);
+        assert!(out.contains("apt: curl"), "got: {out}");
+    }
+
+    // --- which dispatch ---
+
+    #[test]
+    fn dispatch_which_found_in_apt_returns_path() {
+        let mut state = PreviewState::default();
+        state.installed.record("apt", "git".to_string());
+        let (cont, out) = dispatch_str(&mut state, "which git").expect("which should succeed");
+        assert!(cont);
+        assert_eq!(out.trim(), "/usr/bin/git", "got: {out}");
+    }
+
+    #[test]
+    fn dispatch_which_not_found_returns_error() {
+        let mut state = PreviewState::default();
+        let result = dispatch_str(&mut state, "which nonexistent");
+        assert!(
+            matches!(result, Err(ReplError::PathNotFound { .. })),
+            "which with unknown cmd must return PathNotFound; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn dispatch_which_no_arg_returns_invalid_arguments() {
+        let mut state = PreviewState::default();
+        let result = dispatch_str(&mut state, "which");
+        assert!(
+            matches!(result, Err(ReplError::InvalidArguments { ref command, .. }) if command == "which"),
+            "which with no args must return InvalidArguments; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn dispatch_which_found_in_pip_returns_local_bin_path() {
+        let mut state = PreviewState::default();
+        state.installed.record("pip", "flask".to_string());
+        let (cont, out) = dispatch_str(&mut state, "which flask").expect("which should succeed");
+        assert!(cont);
+        assert_eq!(out.trim(), "/usr/local/bin/flask", "got: {out}");
+    }
+
+    #[test]
+    fn dispatch_installed_multiple_managers_shows_both_lines() {
+        let mut state = PreviewState::default();
+        state.installed.record("apt", "curl".to_string());
+        state.installed.record("pip", "requests".to_string());
+        let (cont, out) =
+            dispatch_str(&mut state, ":installed").expect(":installed should succeed");
+        assert!(cont);
+        assert!(out.contains("apt: curl"), "apt line missing; got:\n{out}");
+        assert!(
+            out.contains("pip: requests"),
+            "pip line missing; got:\n{out}"
+        );
+        // apt must appear before pip in the output.
+        let apt_pos = out.find("apt:").expect("apt line must exist");
+        let pip_pos = out.find("pip:").expect("pip line must exist");
+        assert!(apt_pos < pip_pos, "apt must appear before pip; got:\n{out}");
     }
 
     // --- :history dispatch ---

@@ -12,3 +12,4 @@ pub mod find;
 pub mod help;
 pub mod ls;
 pub mod pwd;
+pub mod which;

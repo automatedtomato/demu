@@ -25,6 +25,7 @@ COMMANDS
   cat <path>               print file contents
   find <path> [-name pat]  search filesystem for files
   env                      print environment variables
+  which <cmd>              show simulated binary path for a command
   help                     show this help message
   exit                     leave the REPL
 

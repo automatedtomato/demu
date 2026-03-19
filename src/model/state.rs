@@ -77,6 +77,25 @@ impl InstalledRegistry {
             _ => vec![],
         }
     }
+
+    /// Return the simulated binary prefix for the first manager that has `cmd`
+    /// installed, using the canonical priority order: apt → apk → pip → npm → go.
+    ///
+    /// - `apt` / `apk` → `"/usr/bin"` (system path)
+    /// - `pip` / `npm` / `go` → `"/usr/local/bin"` (user-local path)
+    /// - Not found in any manager → `None`
+    ///
+    /// This centralises the priority logic so that `which` and any future
+    /// consumers (e.g. issue #23) share a single, consistent implementation.
+    pub fn which_prefix(&self, cmd: &str) -> Option<&'static str> {
+        if self.apt.contains(cmd) || self.apk.contains(cmd) {
+            Some("/usr/bin")
+        } else if self.pip.contains(cmd) || self.npm.contains(cmd) || self.go_pkgs.contains(cmd) {
+            Some("/usr/local/bin")
+        } else {
+            None
+        }
+    }
 }
 
 /// A single entry in the instruction history timeline.
@@ -308,6 +327,76 @@ mod tests {
     fn list_unknown_manager_returns_empty_vec() {
         let reg = InstalledRegistry::default();
         assert!(reg.list("brew").is_empty());
+    }
+
+    // --- InstalledRegistry::which_prefix ---
+
+    #[test]
+    fn which_prefix_apt_returns_usr_bin() {
+        let mut reg = InstalledRegistry::default();
+        reg.record("apt", "curl".to_string());
+        assert_eq!(reg.which_prefix("curl"), Some("/usr/bin"));
+    }
+
+    #[test]
+    fn which_prefix_apk_returns_usr_bin() {
+        let mut reg = InstalledRegistry::default();
+        reg.record("apk", "bash".to_string());
+        assert_eq!(reg.which_prefix("bash"), Some("/usr/bin"));
+    }
+
+    #[test]
+    fn which_prefix_pip_returns_usr_local_bin() {
+        let mut reg = InstalledRegistry::default();
+        reg.record("pip", "flask".to_string());
+        assert_eq!(reg.which_prefix("flask"), Some("/usr/local/bin"));
+    }
+
+    #[test]
+    fn which_prefix_npm_returns_usr_local_bin() {
+        let mut reg = InstalledRegistry::default();
+        reg.record("npm", "eslint".to_string());
+        assert_eq!(reg.which_prefix("eslint"), Some("/usr/local/bin"));
+    }
+
+    #[test]
+    fn which_prefix_go_returns_usr_local_bin() {
+        let mut reg = InstalledRegistry::default();
+        reg.record("go", "gopls".to_string());
+        assert_eq!(reg.which_prefix("gopls"), Some("/usr/local/bin"));
+    }
+
+    #[test]
+    fn which_prefix_not_found_returns_none() {
+        let reg = InstalledRegistry::default();
+        assert_eq!(reg.which_prefix("nonexistent"), None);
+    }
+
+    #[test]
+    fn which_prefix_apt_beats_pip_for_same_name() {
+        // apt is searched before pip — apt wins regardless of pip also having the name.
+        let mut reg = InstalledRegistry::default();
+        reg.record("pip", "git".to_string());
+        reg.record("apt", "git".to_string());
+        assert_eq!(reg.which_prefix("git"), Some("/usr/bin"));
+    }
+
+    #[test]
+    fn which_prefix_apk_beats_pip_for_same_name() {
+        // apk is searched in the same group as apt, before pip.
+        let mut reg = InstalledRegistry::default();
+        reg.record("pip", "bash".to_string());
+        reg.record("apk", "bash".to_string());
+        assert_eq!(reg.which_prefix("bash"), Some("/usr/bin"));
+    }
+
+    #[test]
+    fn which_prefix_pip_beats_npm_for_same_name() {
+        // pip is listed first in the local-bin group — pip wins over npm.
+        let mut reg = InstalledRegistry::default();
+        reg.record("npm", "requests".to_string());
+        reg.record("pip", "requests".to_string());
+        assert_eq!(reg.which_prefix("requests"), Some("/usr/local/bin"));
     }
 
     // --- Clone ---

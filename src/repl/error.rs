@@ -15,6 +15,9 @@ use thiserror::Error;
 #[derive(Debug, Error, PartialEq)]
 pub enum ReplError {
     /// The requested path does not exist in the virtual filesystem.
+    ///
+    /// Note: `path` stores the raw, unsanitized value. Callers must apply
+    /// `sanitize_for_terminal` before printing the display string to a terminal.
     #[error("no such file or directory: {path}")]
     PathNotFound { path: PathBuf },
 
