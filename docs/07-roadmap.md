@@ -32,18 +32,17 @@ Includes:
 - pseudo `which`, `pip list`, `apt list --installed`
 - warnings for skipped commands
 
-## v0.3 — provenance and multi-stage
+## v0.3 — provenance and multi-stage ✓ shipped
 
 Goal:
 Help users understand where things came from.
 
 Includes:
 
-- multi-stage support
-- `COPY --from=`
-- `:explain <path>`
-- better layer/provenance views
-- `--stage`
+- multi-stage support (`StageRegistry`, stage save/restore on `FROM`)
+- `COPY --from=<stage>` (alias and numeric index, file and directory)
+- `:explain <path>` (full provenance report)
+- `--stage <name>` CLI flag, preserved across `:reload`
 
 ## v0.4 — Compose service preview
 

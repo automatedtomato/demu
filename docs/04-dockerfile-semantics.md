@@ -51,10 +51,12 @@ That is acceptable as long as this limitation is explicit.
 - Respect destination path relative to current `WORKDIR` when appropriate
 - Preserve enough source metadata to answer `:explain`
 
-### Multi-stage note
+### Multi-stage support
 
-Later versions should support `COPY --from=<stage>`.
-This is essential for multi-stage value.
+`COPY --from=<stage>` is supported as of v0.3. Both alias names (`builder`) and
+numeric indices (`0`) are accepted. Files and directories are copied from the
+completed stage's virtual filesystem. If the named stage or source path does not
+exist, a warning is emitted and the REPL continues.
 
 ## `ENV`
 
