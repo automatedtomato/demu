@@ -37,6 +37,7 @@ CUSTOM COMMANDS (prefix with :)
   :history                 show instruction history
   :installed               show simulated package installs
   :warnings                show simulation warnings
+  :reload                  re-read and re-process the Dockerfile
 
 NOTE: demu is a preview shell. Commands show simulated state, not real containers.
 ";
@@ -128,5 +129,13 @@ mod tests {
     #[test]
     fn help_contains_pip_list() {
         assert!(run().contains("pip list"), "output must mention 'pip list'");
+    }
+
+    #[test]
+    fn help_contains_reload() {
+        assert!(
+            run().contains(":reload"),
+            "output must mention ':reload' in the custom commands section"
+        );
     }
 }
