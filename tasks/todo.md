@@ -1,14 +1,17 @@
 # demu — task tracking
 
-Milestone: [Release v0.2.0](https://github.com/automatedtomato/demu/milestone/2)
-Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
+Milestone: [Release v0.3.0](https://github.com/automatedtomato/demu/milestone/3)
+Tracking issue: [#39](https://github.com/automatedtomato/demu/issues/39)
 
 ## In progress
 
 ## Up next
+- [ ] [#41](https://github.com/automatedtomato/demu/issues/41) feat: multi-stage build support + `--stage` CLI flag
+- [ ] [#42](https://github.com/automatedtomato/demu/issues/42) feat: `COPY --from=<stage>` _(depends on #41)_
 
 ## Done
 
+- [x] [#40](https://github.com/automatedtomato/demu/issues/40) feat: `:explain <path>` REPL command
 - [x] [#25](https://github.com/automatedtomato/demu/issues/25) feat: RUN skipped-command warnings — merged [#36](https://github.com/automatedtomato/demu/pull/36)
 - [x] [#32](https://github.com/automatedtomato/demu/issues/32) refactor: extract `io_err` closure to shared helper — merged [#37](https://github.com/automatedtomato/demu/pull/37)
 - [x] [#33](https://github.com/automatedtomato/demu/issues/33) fix: sanitize env var keys/values in `env_cmd.rs` — merged [#38](https://github.com/automatedtomato/demu/pull/38)

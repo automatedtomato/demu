@@ -27,7 +27,7 @@ use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
 use crate::repl::commands::{apt, cat, cd, env_cmd, find, help, ls, pip, pwd, which};
 use crate::repl::config::ReplConfig;
-use crate::repl::custom::{history, installed, layers, reload};
+use crate::repl::custom::{explain, history, installed, layers, reload};
 use crate::repl::error::ReplError;
 use crate::repl::parse::{parse_input, ParsedCommand};
 
@@ -167,6 +167,9 @@ pub fn dispatch(
         }
         ParsedCommand::Which { cmd } => {
             which::execute(state, &cmd, writer)?;
+        }
+        ParsedCommand::Explain { path } => {
+            explain::execute(state, &path, writer)?;
         }
         ParsedCommand::Exit => {
             return Ok(false);
@@ -594,6 +597,83 @@ mod tests {
     #[test]
     fn reload_is_recognized_by_parse_input() {
         assert_eq!(parse_input(":reload"), ParsedCommand::Reload);
+    }
+
+    // --- :explain dispatch ---
+
+    #[test]
+    fn dispatch_explain_existing_file_shows_provenance() {
+        use crate::model::provenance::ProvenanceSource;
+
+        let mut state = PreviewState::default();
+        // Insert a file with CopyFromHost provenance.
+        let node = FsNode::File(crate::model::fs::FileNode {
+            content: vec![],
+            provenance: crate::model::provenance::Provenance::new(ProvenanceSource::CopyFromHost {
+                host_path: PathBuf::from("src/main.rs"),
+            }),
+            permissions: None,
+        });
+        state.fs.insert(PathBuf::from("/app/main.rs"), node);
+
+        let (cont, out) =
+            dispatch_str(&mut state, ":explain /app/main.rs").expect(":explain should succeed");
+        assert!(cont, ":explain must return true (keep REPL running)");
+        assert!(
+            out.contains("COPY from host: src/main.rs"),
+            "output must show provenance; got: {out}"
+        );
+        assert!(
+            out.contains("Created by:"),
+            "output must contain 'Created by:' label; got: {out}"
+        );
+    }
+
+    #[test]
+    fn dispatch_explain_nonexistent_path_returns_path_not_found() {
+        let mut state = PreviewState::default();
+        let result = dispatch_str(&mut state, ":explain /no/such/file.txt");
+        assert!(
+            matches!(result, Err(ReplError::PathNotFound { .. })),
+            ":explain on missing path must return PathNotFound; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn dispatch_explain_no_argument_returns_invalid_arguments() {
+        let mut state = PreviewState::default();
+        let result = dispatch_str(&mut state, ":explain");
+        assert!(
+            matches!(result, Err(ReplError::InvalidArguments { ref command, .. }) if command == ":explain"),
+            ":explain with no args must return InvalidArguments; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn dispatch_explain_relative_path_resolves_against_cwd() {
+        // :explain main.rs with cwd=/app should find the node at /app/main.rs.
+        use crate::model::provenance::{Provenance, ProvenanceSource};
+        use std::path::PathBuf;
+
+        let prov = Provenance::new(ProvenanceSource::CopyFromHost {
+            host_path: PathBuf::from("src/main.rs"),
+        });
+        let node = FsNode::File(FileNode {
+            content: vec![],
+            provenance: prov,
+            permissions: None,
+        });
+        let mut state = PreviewState::default();
+        state.cwd = PathBuf::from("/app");
+        state.fs.insert(PathBuf::from("/app/main.rs"), node);
+
+        let (cont, out) = dispatch_str(&mut state, ":explain main.rs")
+            .expect(":explain with relative path should succeed");
+        assert!(cont);
+        assert!(
+            out.contains("COPY from host:"),
+            "provenance must appear for relative-path lookup; got: {out}"
+        );
     }
 
     // --- :history dispatch ---
