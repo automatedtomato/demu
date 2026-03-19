@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
-use crate::repl::error::ReplError;
+use crate::repl::error::{io_err_mapper, ReplError};
 
 /// Execute the `which <cmd>` command.
 ///
@@ -51,10 +51,7 @@ pub fn execute(state: &PreviewState, cmd: &str, writer: &mut impl Write) -> Resu
         })?;
 
     let path = format!("{prefix}/{safe_cmd}");
-    writeln!(writer, "{path}").map_err(|e| ReplError::InvalidArguments {
-        command: "which".to_string(),
-        message: e.to_string(),
-    })
+    writeln!(writer, "{path}").map_err(io_err_mapper("which"))
 }
 
 #[cfg(test)]

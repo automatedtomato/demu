@@ -12,7 +12,7 @@ use std::io::Write;
 
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
-use crate::repl::error::ReplError;
+use crate::repl::error::{io_err_mapper, ReplError};
 
 /// Execute the `apt list [--installed]` command.
 ///
@@ -35,29 +35,26 @@ pub fn execute(
     writer: &mut impl Write,
 ) -> Result<(), ReplError> {
     // Map I/O errors into ReplError so callers see a consistent error type.
-    let io_err = |e: std::io::Error| ReplError::InvalidArguments {
-        command: "apt".to_string(),
-        message: e.to_string(),
-    };
+    let io_err = io_err_mapper("apt");
 
     if !installed {
         // No --installed flag — show usage hint, not the full listing.
-        writeln!(writer, "Usage: apt list --installed").map_err(io_err)?;
+        writeln!(writer, "Usage: apt list --installed").map_err(&io_err)?;
         return Ok(());
     }
 
     // --installed flag given — produce the Debian-style listing.
-    writeln!(writer, "Listing...").map_err(io_err)?;
+    writeln!(writer, "Listing...").map_err(&io_err)?;
 
     let packages = state.installed.list("apt");
     if packages.is_empty() {
-        writeln!(writer, "(no packages recorded)").map_err(io_err)?;
+        writeln!(writer, "(no packages recorded)").map_err(&io_err)?;
     } else {
         for pkg in &packages {
             // Sanitize each package name before writing; package names come
             // from engine-processed Dockerfile text which may contain escape bytes.
             let safe_pkg = sanitize_for_terminal(pkg);
-            writeln!(writer, "{safe_pkg}/simulated [installed,simulated]").map_err(io_err)?;
+            writeln!(writer, "{safe_pkg}/simulated [installed,simulated]").map_err(&io_err)?;
         }
     }
 

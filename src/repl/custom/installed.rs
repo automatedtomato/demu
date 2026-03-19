@@ -11,7 +11,7 @@ use std::io::Write;
 
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
-use crate::repl::error::ReplError;
+use crate::repl::error::{io_err_mapper, ReplError};
 
 /// Canonical display order for package managers.
 ///
@@ -39,10 +39,7 @@ const MANAGER_ORDER: &[&str] = &["apt", "pip", "npm", "apk", "go"];
 /// [`ReplError::InvalidArguments`].
 pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), ReplError> {
     // Map I/O errors into a uniform ReplError.
-    let io_err = |e: std::io::Error| ReplError::InvalidArguments {
-        command: ":installed".to_string(),
-        message: e.to_string(),
-    };
+    let io_err = io_err_mapper(":installed");
 
     // Collect non-empty managers in canonical order.
     let mut any_printed = false;
@@ -57,12 +54,12 @@ pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), Repl
         // user-supplied and may in theory contain control characters.
         let sanitized: Vec<String> = packages.iter().map(|p| sanitize_for_terminal(p)).collect();
 
-        writeln!(writer, "{}: {}", manager, sanitized.join(", ")).map_err(io_err)?;
+        writeln!(writer, "{}: {}", manager, sanitized.join(", ")).map_err(&io_err)?;
         any_printed = true;
     }
 
     if !any_printed {
-        writeln!(writer, "No packages recorded.").map_err(io_err)?;
+        writeln!(writer, "No packages recorded.").map_err(&io_err)?;
     }
 
     Ok(())

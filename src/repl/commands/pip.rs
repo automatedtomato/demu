@@ -14,7 +14,7 @@ use std::io::Write;
 
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
-use crate::repl::error::ReplError;
+use crate::repl::error::{io_err_mapper, ReplError};
 
 /// Column width for the Package name field.
 ///
@@ -32,21 +32,18 @@ const PKG_COL_WIDTH: usize = 10;
 /// Package names are sanitized before output to prevent terminal escape injection.
 pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), ReplError> {
     // Map I/O errors into ReplError so callers see a consistent error type.
-    let io_err = |e: std::io::Error| ReplError::InvalidArguments {
-        command: "pip".to_string(),
-        message: e.to_string(),
-    };
+    let io_err = io_err_mapper("pip");
 
     // Always write the header and separator, even for an empty registry.
-    writeln!(writer, "Package    Version").map_err(io_err)?;
-    writeln!(writer, "---------- -------").map_err(io_err)?;
+    writeln!(writer, "Package    Version").map_err(&io_err)?;
+    writeln!(writer, "---------- -------").map_err(&io_err)?;
 
     let packages = state.installed.list("pip");
     for pkg in &packages {
         // Sanitize each package name before writing; package names originate from
         // engine-processed Dockerfile text which may contain escape bytes.
         let safe_pkg = sanitize_for_terminal(pkg);
-        writeln!(writer, "{safe_pkg:<PKG_COL_WIDTH$} (simulated)").map_err(io_err)?;
+        writeln!(writer, "{safe_pkg:<PKG_COL_WIDTH$} (simulated)").map_err(&io_err)?;
     }
 
     Ok(())
