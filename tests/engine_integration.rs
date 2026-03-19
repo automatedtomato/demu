@@ -26,7 +26,9 @@ const CONTEXT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/e
 fn test_minimal_full_pipeline() {
     let input = include_str!("fixtures/engine/minimal.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     // WORKDIR /app must set cwd.
     assert_eq!(state.cwd, std::path::PathBuf::from("/app"));
@@ -73,7 +75,9 @@ fn test_minimal_full_pipeline() {
 fn test_workdir_relative_resolution() {
     let input = include_str!("fixtures/engine/workdir_relative.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     // WORKDIR /opt then WORKDIR sub/dir → final cwd is /opt/sub/dir.
     assert_eq!(state.cwd, std::path::PathBuf::from("/opt/sub/dir"));
@@ -99,7 +103,9 @@ fn test_workdir_relative_resolution() {
 fn test_copy_missing_source_emits_warning() {
     let input = include_str!("fixtures/engine/copy_missing.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     assert!(
         state
@@ -116,7 +122,9 @@ fn test_copy_missing_source_emits_warning() {
 fn test_copy_directory_recursive() {
     let input = include_str!("fixtures/engine/copy_directory.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     // `sub/nested.txt` from context must appear at `/data/nested.txt`.
     assert!(
@@ -131,7 +139,9 @@ fn test_copy_directory_recursive() {
 fn test_unknown_instructions_emit_warnings() {
     let input = include_str!("fixtures/engine/unknown_instructions.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     // EXPOSE and HEALTHCHECK are both unknown → 2 UnsupportedInstruction warnings.
     let unsupported_count = state
@@ -151,7 +161,9 @@ fn test_unknown_instructions_emit_warnings() {
 fn test_env_accumulation() {
     let input = include_str!("fixtures/engine/env_accumulation.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     assert_eq!(state.env.get("FIRST"), Some(&"one".to_string()));
     assert_eq!(state.env.get("SECOND"), Some(&"two".to_string()));

@@ -264,12 +264,13 @@ fn multi_instruction_dockerfile_with_eof_stdin_exits_zero() {
     );
 }
 
-// ── test 10: --stage flag exits 1 with a clear "not yet implemented" error ───
+// ── test 10: --stage with nonexistent name exits 1 with a clear error ────────
 
 #[test]
 fn stage_flag_exits_one_with_not_implemented_error() {
-    // `--stage` is parsed by clap but not yet wired to the engine. To avoid
-    // silently showing the wrong stage, demu must exit 1 with a clear error.
+    // Requesting a stage name that does not exist must exit 1 with a clear
+    // error message that names the missing stage and lists available stages.
+    // "FROM scratch" produces only stage "0" (no alias), so "builder" is unknown.
     let dockerfile = temp_dockerfile("FROM scratch\n");
 
     let output = demu()
@@ -286,7 +287,7 @@ fn stage_flag_exits_one_with_not_implemented_error() {
     assert_eq!(
         output.status.code(),
         Some(1),
-        "--stage must exit 1, got: {:?}",
+        "--stage with unknown stage must exit 1, got: {:?}",
         output.status
     );
 
@@ -300,8 +301,13 @@ fn stage_flag_exits_one_with_not_implemented_error() {
         "--stage error must mention 'stage', got: {stderr}"
     );
     assert!(
-        stderr.contains("not yet implemented"),
-        "--stage error must say 'not yet implemented', got: {stderr}"
+        stderr.contains("not found"),
+        "--stage error must say 'not found', got: {stderr}"
+    );
+    // The error must list available stages so the user knows what to pass.
+    assert!(
+        stderr.contains("available stages"),
+        "--stage error must list 'available stages', got: {stderr}"
     );
 }
 

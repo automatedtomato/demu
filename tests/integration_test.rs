@@ -38,7 +38,9 @@ const CONTEXT_DIR: &str = concat!(
 fn test_basic_copy() {
     let input = include_str!("fixtures/integration/basic_copy.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     // WORKDIR /app must set cwd.
     assert_eq!(state.cwd, std::path::PathBuf::from("/app"));
@@ -126,7 +128,9 @@ fn test_basic_copy() {
 fn test_env_vars() {
     let input = include_str!("fixtures/integration/env_vars.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     // All three ENV vars must be present with the correct values.
     assert_eq!(
@@ -191,7 +195,9 @@ fn test_env_vars() {
 fn test_run_history() {
     let input = include_str!("fixtures/integration/run_history.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     // Every RUN must appear as a history entry.
     // FROM + 3 × RUN = 4 total entries.
@@ -294,7 +300,9 @@ fn test_run_history() {
 fn test_missing_copy_src() {
     let input = include_str!("fixtures/integration/missing_copy_src.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     // A MissingCopySource warning must have been emitted with the correct path.
     assert!(
@@ -345,7 +353,9 @@ fn test_missing_copy_src() {
 fn test_multi_instruction() {
     let input = include_str!("fixtures/integration/multi_instruction.dockerfile");
     let instructions = parse_dockerfile(input).expect("parse");
-    let state = run(instructions, Path::new(CONTEXT_DIR)).expect("run");
+    let state = run(instructions, Path::new(CONTEXT_DIR))
+        .expect("run")
+        .state;
 
     // WORKDIR /srv must set cwd.
     assert_eq!(
