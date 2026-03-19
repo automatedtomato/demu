@@ -13,7 +13,7 @@ use crate::model::{
     fs::{DirNode, FileNode, FsNode, VirtualFs},
     instruction::CopySource,
     provenance::{Provenance, ProvenanceSource},
-    state::{LayerSummary, PreviewState},
+    state::{LayerSummary, PreviewState, StageRegistry},
     warning::Warning,
 };
 
@@ -70,6 +70,7 @@ pub(crate) fn ensure_ancestors(
 /// - `dest`        — destination path inside the container
 /// - `context_dir` — the host build context directory root
 /// - `line`        — source line number for provenance tracking
+/// - `stages`      — registry of completed build stages for `COPY --from=<stage>`
 ///
 /// # Returns
 /// A `LayerSummary` listing every path that was inserted into the filesystem.
@@ -81,6 +82,7 @@ pub(crate) fn handle_copy(
     dest: &Path,
     context_dir: &Path,
     line: usize,
+    stages: &StageRegistry,
 ) -> Result<LayerSummary, EngineError> {
     // Resolve the destination path: relative dests are joined to the current cwd.
     let dest_str = dest.to_string_lossy();
@@ -193,14 +195,156 @@ pub(crate) fn handle_copy(
                 )?;
             }
         }
-        // Stage-to-stage copies are not yet modeled in v0.1.
-        CopySource::Stage(stage) => {
-            // Surface an UnsupportedInstruction warning so the user knows
-            // this COPY was skipped rather than silently producing an empty fs.
-            state.warnings.push(Warning::UnsupportedInstruction {
-                instruction: format!("COPY --from={stage}"),
-                line,
-            });
+        // Stage-to-stage copy: look up the source stage in the registry,
+        // then copy the specified path (file or directory) into this stage's fs.
+        CopySource::Stage { name, src_path } => {
+            // 1. Resolve the source stage. Relative src_paths are treated as
+            //    absolute from the stage root (prepend "/" if not already absolute).
+            let resolved_src = if src_path.is_absolute() {
+                src_path.clone()
+            } else {
+                PathBuf::from("/").join(src_path)
+            };
+
+            // 2. Look up the stage by name or numeric index.
+            let source_stage = match stages.get(name) {
+                Some(s) => s,
+                None => {
+                    // Stage not found — emit MissingCopyStage warning and return empty.
+                    state.warnings.push(Warning::MissingCopyStage {
+                        stage: name.clone(),
+                        line,
+                    });
+                    return Ok(LayerSummary {
+                        instruction_type: "COPY".to_string(),
+                        files_changed,
+                        env_changed: vec![],
+                    });
+                }
+            };
+
+            // 3. Look up the source path in the stage's virtual filesystem.
+            match source_stage.fs.get(&resolved_src) {
+                None => {
+                    // Path not found in source stage — emit MissingCopySource warning.
+                    state.warnings.push(Warning::MissingCopySource {
+                        path: resolved_src.clone(),
+                    });
+                    // Insert an empty placeholder file at the destination so the
+                    // user can still see something at the expected path.
+                    let provenance = ProvenanceSource::CopyFromStage {
+                        stage: name.clone(),
+                    };
+                    ensure_ancestors(&mut state.fs, &resolved_dest, provenance.clone());
+                    state.fs.insert(
+                        resolved_dest.clone(),
+                        FsNode::File(FileNode {
+                            content: vec![],
+                            provenance: Provenance::new(provenance),
+                            permissions: None,
+                        }),
+                    );
+                }
+
+                Some(FsNode::File(src_file)) => {
+                    // Single-file copy from the source stage.
+                    let provenance = ProvenanceSource::CopyFromStage {
+                        stage: name.clone(),
+                    };
+                    // Determine the final destination (respects trailing slash).
+                    let final_dest = resolve_file_dest(
+                        &resolved_dest,
+                        &resolved_src,
+                        has_trailing_slash,
+                    )
+                    .unwrap_or(resolved_dest.clone());
+
+                    ensure_ancestors(&mut state.fs, &final_dest, provenance.clone());
+                    // Clone the source node content and replace provenance to record
+                    // that this file originates from a stage copy, not the host.
+                    state.fs.insert(
+                        final_dest.clone(),
+                        FsNode::File(FileNode {
+                            content: src_file.content.clone(),
+                            provenance: Provenance::new(provenance),
+                            permissions: src_file.permissions,
+                        }),
+                    );
+                    files_changed.push(final_dest);
+                }
+
+                Some(FsNode::Directory(_)) => {
+                    // Directory copy: collect all nodes under resolved_src in the
+                    // source stage's fs and insert them into this stage's fs.
+                    //
+                    // We clone the subtree to avoid borrowing source_stage while
+                    // we mutably borrow state below.
+                    let subtree = source_stage.fs.clone_subtree(&resolved_src);
+
+                    for (abs_path, node) in subtree {
+                        // Compute the relative path within the source directory.
+                        let relative = match abs_path.strip_prefix(&resolved_src) {
+                            Ok(r) => r.to_path_buf(),
+                            // strip_prefix should never fail because clone_subtree
+                            // only returns paths that start with resolved_src.
+                            Err(_) => continue,
+                        };
+
+                        // The destination is resolved_dest joined with the relative suffix.
+                        let resolved_dest_entry = if relative.as_os_str().is_empty() {
+                            // The root of the subtree maps to resolved_dest itself.
+                            resolved_dest.clone()
+                        } else {
+                            resolved_dest.join(&relative)
+                        };
+
+                        let provenance = ProvenanceSource::CopyFromStage {
+                            stage: name.clone(),
+                        };
+
+                        ensure_ancestors(&mut state.fs, &resolved_dest_entry, provenance.clone());
+
+                        match &node {
+                            FsNode::File(src_file) => {
+                                state.fs.insert(
+                                    resolved_dest_entry.clone(),
+                                    FsNode::File(FileNode {
+                                        content: src_file.content.clone(),
+                                        provenance: Provenance::new(provenance),
+                                        permissions: src_file.permissions,
+                                    }),
+                                );
+                                files_changed.push(resolved_dest_entry);
+                            }
+                            FsNode::Directory(src_dir) => {
+                                if !state.fs.contains(&resolved_dest_entry) {
+                                    state.fs.insert(
+                                        resolved_dest_entry.clone(),
+                                        FsNode::Directory(DirNode {
+                                            provenance: Provenance::new(provenance),
+                                            permissions: src_dir.permissions,
+                                        }),
+                                    );
+                                }
+                                files_changed.push(resolved_dest_entry);
+                            }
+                            FsNode::Symlink(_) => {
+                                // Symlinks are not yet modeled for stage copies.
+                                // Skip silently — provenance already records this
+                                // is a stage copy so the user can use :explain.
+                            }
+                        }
+                    }
+                }
+
+                Some(FsNode::Symlink(_)) => {
+                    // Symlinks are not modeled for stage copies yet.
+                    // Emit MissingCopySource so the user sees a diagnostic.
+                    state.warnings.push(Warning::MissingCopySource {
+                        path: resolved_src.clone(),
+                    });
+                }
+            }
         }
     }
 
@@ -347,7 +491,8 @@ mod tests {
     ) -> LayerSummary {
         let source = CopySource::Host(PathBuf::from(src));
         let dest_path = PathBuf::from(dest);
-        handle_copy(state, &source, &dest_path, context, 1).expect("handle_copy ok")
+        handle_copy(state, &source, &dest_path, context, 1, &StageRegistry::default())
+            .expect("handle_copy ok")
     }
 
     // ── test: copy single file reads content ──────────────────────────────
@@ -520,47 +665,45 @@ mod tests {
         assert!(has_y, "y.txt must be in files_changed");
     }
 
-    // ── test: Stage source emits UnsupportedInstruction warning ──────────
+    // ── test: Stage copy with empty registry emits MissingCopyStage ──────
 
     #[test]
-    fn copy_stage_source_emits_unsupported_instruction_warning() {
-        // CopySource::Stage is currently unreachable from the parser (the parser
-        // downgrades COPY --from= to Unknown), but handle_copy must still behave
-        // correctly when called directly (e.g. from future multi-stage support).
+    fn copy_stage_source_with_empty_registry_emits_missing_stage_warning() {
+        // When handle_copy is called with CopySource::Stage but the stage is
+        // not in the registry, it must emit MissingCopyStage (not the old
+        // UnsupportedInstruction placeholder) and return an empty LayerSummary.
         let ctx = tempfile::tempdir().expect("tempdir");
         let mut state = PreviewState::default();
-        let source = CopySource::Stage("builder".to_string());
+        let source = CopySource::Stage {
+            name: "builder".to_string(),
+            src_path: std::path::PathBuf::from("/out/app"),
+        };
         let dest = PathBuf::from("/app");
-        let layer = handle_copy(&mut state, &source, &dest, ctx.path(), 5).expect("handle_copy ok");
+        let layer = handle_copy(
+            &mut state,
+            &source,
+            &dest,
+            ctx.path(),
+            5,
+            &StageRegistry::default(),
+        )
+        .expect("handle_copy ok");
 
-        // No files should be copied from a stage source.
+        // No files should be copied — stage does not exist.
         assert!(
             layer.files_changed.is_empty(),
-            "no files changed for Stage source"
+            "no files changed when stage is absent from registry"
         );
 
-        // No fs mutations should have occurred.
-        assert!(
-            state.fs.get(Path::new("/app")).is_none(),
-            "fs must be empty after Stage COPY"
-        );
-
-        // An UnsupportedInstruction warning must be emitted.
+        // MissingCopyStage warning must be emitted with correct fields.
         let warning = state
             .warnings
             .iter()
-            .find(|w| matches!(w, Warning::UnsupportedInstruction { .. }));
-        assert!(warning.is_some(), "expected UnsupportedInstruction warning");
-        match warning.unwrap() {
-            Warning::UnsupportedInstruction { instruction, line } => {
-                assert!(
-                    instruction.contains("builder"),
-                    "warning instruction must mention stage name, got: {instruction}"
-                );
-                assert_eq!(*line, 5, "warning line must match the supplied line");
-            }
-            _ => panic!("unexpected warning variant"),
-        }
+            .find(|w| matches!(w, Warning::MissingCopyStage { stage, line: 5 } if stage == "builder"));
+        assert!(
+            warning.is_some(),
+            "expected MissingCopyStage {{ stage: 'builder', line: 5 }} warning"
+        );
     }
 
     // ── test: resolve_file_dest with no-filename source returns None ─────
@@ -591,6 +734,198 @@ mod tests {
             resolve_file_dest(&dest, Path::new(".."), false),
             Some(PathBuf::from("/app/file.txt")),
             "no trailing slash must always return dest"
+        );
+    }
+
+    // ── Step 7 tests: stage-to-stage copy (RED until Step 8) ──────────────
+
+    /// Helper: build a StageRegistry with one stage that contains `path` as a file.
+    fn make_stage_with_file(
+        alias: &str,
+        path: &str,
+        content: &[u8],
+    ) -> crate::model::state::StageRegistry {
+        use crate::model::{
+            fs::{FileNode, FsNode},
+            provenance::{Provenance, ProvenanceSource},
+            state::StageRegistry,
+        };
+
+        let mut stage_state = PreviewState::default();
+        // Ensure ancestor dirs exist in the stage state.
+        let p = std::path::PathBuf::from(path);
+        ensure_ancestors(
+            &mut stage_state.fs,
+            &p,
+            ProvenanceSource::CopyFromHost {
+                host_path: p.clone(),
+            },
+        );
+        stage_state.fs.insert(
+            p,
+            FsNode::File(FileNode {
+                content: content.to_vec(),
+                provenance: Provenance::new(ProvenanceSource::CopyFromHost {
+                    host_path: std::path::PathBuf::from(path),
+                }),
+                permissions: None,
+            }),
+        );
+
+        let mut registry = StageRegistry::default();
+        registry.insert(0, Some(alias), stage_state);
+        registry
+    }
+
+    #[test]
+    fn copy_from_stage_copies_file() {
+        // A StageRegistry with one stage containing /out/app as a file.
+        // handle_copy must place the file at /app/binary with CopyFromStage provenance.
+        let registry = make_stage_with_file("builder", "/out/app", b"binary content");
+        let ctx = tempfile::tempdir().expect("tempdir");
+        let mut state = PreviewState::default();
+
+        let source = CopySource::Stage {
+            name: "builder".to_string(),
+            src_path: std::path::PathBuf::from("/out/app"),
+        };
+        let dest = PathBuf::from("/app/binary");
+        let layer = handle_copy(&mut state, &source, &dest, ctx.path(), 1, &registry)
+            .expect("handle_copy ok");
+
+        // File must exist at /app/binary.
+        let node = state
+            .fs
+            .get(Path::new("/app/binary"))
+            .expect("/app/binary must exist after stage copy");
+
+        match node {
+            FsNode::File(f) => {
+                assert_eq!(f.content, b"binary content", "content must match source stage file");
+                // Provenance must be CopyFromStage.
+                match &f.provenance.created_by {
+                    ProvenanceSource::CopyFromStage { stage } => {
+                        assert_eq!(stage, "builder", "stage name must be 'builder'");
+                    }
+                    other => panic!("expected CopyFromStage provenance, got: {other:?}"),
+                }
+            }
+            _ => panic!("expected File node at /app/binary"),
+        }
+
+        // files_changed must include the dest.
+        assert!(
+            layer.files_changed.contains(&PathBuf::from("/app/binary")),
+            "files_changed must include /app/binary"
+        );
+    }
+
+    #[test]
+    fn copy_from_stage_missing_stage_emits_warning() {
+        // Empty registry → stage "nonexistent" not found → MissingCopyStage warning.
+        let registry = StageRegistry::default();
+        let ctx = tempfile::tempdir().expect("tempdir");
+        let mut state = PreviewState::default();
+
+        let source = CopySource::Stage {
+            name: "nonexistent".to_string(),
+            src_path: std::path::PathBuf::from("/app"),
+        };
+        let layer = handle_copy(&mut state, &source, &PathBuf::from("/out"), ctx.path(), 3, &registry)
+            .expect("handle_copy ok");
+
+        // files_changed must be empty — nothing was copied.
+        assert!(
+            layer.files_changed.is_empty(),
+            "no files should be changed when stage is missing"
+        );
+
+        // MissingCopyStage warning must be present.
+        let has_warning = state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::MissingCopyStage { stage, line: 3 } if stage == "nonexistent"));
+        assert!(has_warning, "expected MissingCopyStage warning for 'nonexistent' at line 3");
+    }
+
+    #[test]
+    fn copy_from_stage_missing_source_path_emits_warning() {
+        // Stage exists but source path /out/missing is absent from its fs.
+        let registry = make_stage_with_file("builder", "/out/app", b"data");
+        let ctx = tempfile::tempdir().expect("tempdir");
+        let mut state = PreviewState::default();
+
+        let source = CopySource::Stage {
+            name: "builder".to_string(),
+            src_path: std::path::PathBuf::from("/out/missing"),
+        };
+        let _layer =
+            handle_copy(&mut state, &source, &PathBuf::from("/app"), ctx.path(), 5, &registry)
+                .expect("handle_copy ok");
+
+        // MissingCopySource warning must be present.
+        let has_warning = state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::MissingCopySource { path } if path.ends_with("missing")));
+        assert!(has_warning, "expected MissingCopySource warning for absent path in stage");
+    }
+
+    #[test]
+    fn copy_from_stage_provenance_is_copy_from_stage() {
+        // The copied file's provenance.created_by must be CopyFromStage { stage: "builder" }.
+        let registry = make_stage_with_file("builder", "/out/app", b"hello");
+        let ctx = tempfile::tempdir().expect("tempdir");
+        let mut state = PreviewState::default();
+
+        let source = CopySource::Stage {
+            name: "builder".to_string(),
+            src_path: std::path::PathBuf::from("/out/app"),
+        };
+        handle_copy(
+            &mut state,
+            &source,
+            &PathBuf::from("/app/binary"),
+            ctx.path(),
+            1,
+            &registry,
+        )
+        .expect("handle_copy ok");
+
+        let node = state
+            .fs
+            .get(Path::new("/app/binary"))
+            .expect("file must exist");
+        match &node.provenance().created_by {
+            ProvenanceSource::CopyFromStage { stage } => {
+                assert_eq!(stage, "builder");
+            }
+            other => panic!("expected CopyFromStage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn copy_from_stage_by_numeric_index() {
+        // Stage stored under key "0" — lookup by name "0" must work.
+        let registry = make_stage_with_file("builder", "/out/app", b"data");
+        // The registry has both "0" and "builder" keys; test that "0" lookup works.
+        let ctx = tempfile::tempdir().expect("tempdir");
+        let mut state = PreviewState::default();
+
+        let source = CopySource::Stage {
+            name: "0".to_string(),
+            src_path: std::path::PathBuf::from("/out/app"),
+        };
+        let layer = handle_copy(&mut state, &source, &PathBuf::from("/result"), ctx.path(), 1, &registry)
+            .expect("handle_copy ok");
+
+        assert!(
+            !layer.files_changed.is_empty(),
+            "numeric index '0' lookup must copy the file"
+        );
+        assert!(
+            state.fs.contains(Path::new("/result")),
+            "/result must exist after numeric-index stage copy"
         );
     }
 }

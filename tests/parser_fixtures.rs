@@ -167,12 +167,22 @@ fn test_malformed_copy_returns_error() {
 }
 
 #[test]
-fn test_copy_with_from_flag_becomes_unknown() {
+fn test_copy_with_from_flag_parses_as_stage_copy() {
+    // `COPY --from=builder /out/app /app/app` — now parsed as a stage copy (v0.3+).
     let input = include_str!("fixtures/parser/copy_with_from_flag.dockerfile");
     let instructions =
-        parse_dockerfile(input).expect("COPY --from should not error, becomes Unknown");
+        parse_dockerfile(input).expect("COPY --from should parse without error");
     assert_eq!(instructions.len(), 2);
     assert!(matches!(instructions[0], Instruction::From { .. }));
-    // COPY --from=builder is unsupported in v0.1 → Unknown
-    assert!(matches!(instructions[1], Instruction::Unknown { .. }));
+    // COPY --from=builder must now produce a typed Copy instruction.
+    assert_eq!(
+        instructions[1],
+        Instruction::Copy {
+            source: CopySource::Stage {
+                name: "builder".to_string(),
+                src_path: PathBuf::from("/out/app"),
+            },
+            dest: PathBuf::from("/app/app"),
+        }
+    );
 }

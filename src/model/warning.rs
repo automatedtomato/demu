@@ -96,6 +96,17 @@ pub enum Warning {
         /// The image name from the FROM instruction.
         image: String,
     },
+
+    /// A `COPY --from=<stage>` referenced a stage name that is not in the registry.
+    ///
+    /// This is emitted when the stage lookup in `StageRegistry::get` returns `None`.
+    /// The copy is skipped rather than crashing the engine.
+    MissingCopyStage {
+        /// The stage name or numeric index that was not found.
+        stage: String,
+        /// Source line number (1-based) where the COPY instruction appeared.
+        line: usize,
+    },
 }
 
 /// # Terminal output safety
@@ -154,6 +165,13 @@ impl fmt::Display for Warning {
                     f,
                     "base image '{}' has no stub; filesystem starts empty",
                     image
+                )
+            }
+            Warning::MissingCopyStage { stage, line } => {
+                write!(
+                    f,
+                    "COPY --from='{}' references unknown stage at line {} (skipped)",
+                    stage, line
                 )
             }
         }
@@ -488,5 +506,69 @@ mod tests {
             image: "X".to_string(),
         };
         assert_ne!(a, b);
+    }
+
+    // --- MissingCopyStage ---
+
+    #[test]
+    fn missing_copy_stage_stores_stage_and_line() {
+        let w = Warning::MissingCopyStage {
+            stage: "builder".to_string(),
+            line: 7,
+        };
+        assert_eq!(
+            w,
+            Warning::MissingCopyStage {
+                stage: "builder".to_string(),
+                line: 7
+            }
+        );
+    }
+
+    #[test]
+    fn display_missing_copy_stage_contains_stage_name() {
+        let w = Warning::MissingCopyStage {
+            stage: "builder".to_string(),
+            line: 7,
+        };
+        let s = w.to_string();
+        assert!(!s.is_empty());
+        assert!(
+            s.contains("builder"),
+            "display must contain stage name, got: {s}"
+        );
+        assert!(s.contains('7'), "display must contain line number 7, got: {s}");
+    }
+
+    #[test]
+    fn display_missing_copy_stage_full_string() {
+        let w = Warning::MissingCopyStage {
+            stage: "mybuilder".to_string(),
+            line: 12,
+        };
+        assert_eq!(
+            w.to_string(),
+            "COPY --from='mybuilder' references unknown stage at line 12 (skipped)"
+        );
+    }
+
+    #[test]
+    fn display_missing_copy_stage_numeric_index() {
+        // Numeric stage indices (e.g. "0") must appear in the message.
+        let w = Warning::MissingCopyStage {
+            stage: "0".to_string(),
+            line: 3,
+        };
+        let s = w.to_string();
+        assert!(s.contains("'0'"), "display must contain quoted stage '0', got: {s}");
+    }
+
+    #[test]
+    fn missing_copy_stage_clone_produces_equal_value() {
+        let w = Warning::MissingCopyStage {
+            stage: "runner".to_string(),
+            line: 5,
+        };
+        assert_eq!(w.clone(), w);
     }
 }
