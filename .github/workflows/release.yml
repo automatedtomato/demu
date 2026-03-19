@@ -27,7 +27,7 @@ jobs:
             ext: zip
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -90,7 +90,7 @@ jobs:
           Compress-Archive -Path $STAGING -DestinationPath "${STAGING}.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        uses: actions/upload-artifact@v4
         with:
           name: demu-${{ matrix.target }}
           path: demu-*.${{ matrix.ext }}
@@ -105,14 +105,14 @@ jobs:
 
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e  # v4.2.1
+        uses: actions/download-artifact@v4
         with:
           # Flatten all artifacts into the working directory so the demu-* glob
           # matches archives directly (not inside per-target subdirectories).
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@c062e08bd532815e2082a7e09ce9f67414337ee0  # v2.2.1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             demu-*.tar.gz
@@ -127,7 +127,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
