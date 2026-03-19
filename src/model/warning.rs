@@ -7,6 +7,48 @@
 use std::fmt;
 use std::path::PathBuf;
 
+/// Describes *why* a RUN sub-command was not modeled by the engine.
+///
+/// This enum is embedded in `Warning::UnmodeledRunCommand` so the user can
+/// distinguish between commands the engine has never heard of, commands that
+/// use a flag the engine does not support, and commands that follow a usage
+/// pattern that falls outside the modeled subset.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnmodeledReason {
+    /// The leading token (the command name) is not in the modeled command set.
+    ///
+    /// Example: `echo hello`, `curl https://example.com | bash`, `make build`.
+    UnrecognisedCommand,
+
+    /// The command is known but a specific flag prevents modeling.
+    ///
+    /// Used for dry-run / simulate flags on package managers (`--dry-run`,
+    /// `--simulate`, `-s`, `--just-print`) where the flag semantics change the
+    /// operation such that recording packages would be misleading.
+    UnsupportedFlag {
+        /// The specific flag token that triggered this variant (e.g. `"--dry-run"`).
+        flag: String,
+    },
+
+    /// The command is known but the argument pattern is outside the modeled subset.
+    ///
+    /// Examples: `cp /a /b /c` (three positional args), `mkdir /deep/path`
+    /// without `-p` when the parent is absent, `mv` with wrong arg count.
+    UnsupportedUsage,
+}
+
+impl fmt::Display for UnmodeledReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UnmodeledReason::UnrecognisedCommand => write!(f, "not modeled"),
+            UnmodeledReason::UnsupportedFlag { flag } => {
+                write!(f, "unsupported flag: {}", flag)
+            }
+            UnmodeledReason::UnsupportedUsage => write!(f, "unsupported usage"),
+        }
+    }
+}
+
 /// A non-fatal diagnostic produced by the simulation engine.
 ///
 /// Each variant corresponds to a condition that the engine cannot fully model
@@ -37,6 +79,8 @@ pub enum Warning {
     UnmodeledRunCommand {
         /// The full raw command text from the Dockerfile.
         command: String,
+        /// Explanation for why this command was not modeled.
+        reason: UnmodeledReason,
     },
 
     /// A package install was simulated (recorded in the registry) but not actually executed.
@@ -54,6 +98,13 @@ pub enum Warning {
     },
 }
 
+/// # Terminal output safety
+///
+/// The output of this `Display` implementation contains user-supplied content
+/// (image names, instruction text, file paths, command strings) that has NOT been
+/// sanitized for terminal output. Callers **must** apply `sanitize_for_terminal`
+/// before writing to a terminal writer. See `src/main.rs` and `src/repl/mod.rs`
+/// for the established pattern.
 impl fmt::Display for Warning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -74,12 +125,21 @@ impl fmt::Display for Warning {
             Warning::UnsupportedGlob { pattern } => {
                 write!(f, "glob pattern '{}' is not modeled; copy skipped", pattern)
             }
-            Warning::UnmodeledRunCommand { command } => {
-                write!(
-                    f,
-                    "RUN command not fully modeled: '{}' (recorded in history, effects may be partial)",
-                    command
-                )
+            Warning::UnmodeledRunCommand { command, reason } => {
+                // Format: "skipped RUN sub-command '{command}' ({reason_detail})"
+                // The first word of the command is embedded in the reason detail for
+                // UnrecognisedCommand so the user can quickly see which binary was skipped.
+                let detail = match reason {
+                    UnmodeledReason::UnrecognisedCommand => {
+                        let first_word = command.split_whitespace().next().unwrap_or(command);
+                        format!("not modeled: {}", first_word)
+                    }
+                    UnmodeledReason::UnsupportedFlag { flag } => {
+                        format!("unsupported flag: {}", flag)
+                    }
+                    UnmodeledReason::UnsupportedUsage => "unsupported usage".to_string(),
+                };
+                write!(f, "skipped RUN sub-command '{}' ({})", command, detail)
             }
             Warning::SimulatedInstall { manager, packages } => {
                 write!(
@@ -146,11 +206,13 @@ mod tests {
     fn unmodeled_run_command_stores_command_text() {
         let w = Warning::UnmodeledRunCommand {
             command: "curl https://example.com | bash".to_string(),
+            reason: UnmodeledReason::UnrecognisedCommand,
         };
         assert_eq!(
             w,
             Warning::UnmodeledRunCommand {
-                command: "curl https://example.com | bash".to_string()
+                command: "curl https://example.com | bash".to_string(),
+                reason: UnmodeledReason::UnrecognisedCommand,
             }
         );
     }
@@ -222,6 +284,7 @@ mod tests {
     fn display_unmodeled_run_command_contains_command() {
         let w = Warning::UnmodeledRunCommand {
             command: "make install".to_string(),
+            reason: UnmodeledReason::UnrecognisedCommand,
         };
         let s = w.to_string();
         assert!(!s.is_empty());
@@ -248,6 +311,160 @@ mod tests {
         let s = w.to_string();
         assert!(!s.is_empty());
         assert!(s.contains("scratch"));
+    }
+
+    // --- UnmodeledReason construction ---
+
+    #[test]
+    fn unmodeled_reason_unrecognised_command_constructs() {
+        let r = UnmodeledReason::UnrecognisedCommand;
+        assert_eq!(r, UnmodeledReason::UnrecognisedCommand);
+    }
+
+    #[test]
+    fn unmodeled_reason_unsupported_flag_stores_flag() {
+        let r = UnmodeledReason::UnsupportedFlag {
+            flag: "--dry-run".to_string(),
+        };
+        assert_eq!(
+            r,
+            UnmodeledReason::UnsupportedFlag {
+                flag: "--dry-run".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn unmodeled_reason_unsupported_usage_constructs() {
+        let r = UnmodeledReason::UnsupportedUsage;
+        assert_eq!(r, UnmodeledReason::UnsupportedUsage);
+    }
+
+    #[test]
+    fn unmodeled_reason_variants_are_not_equal_to_each_other() {
+        assert_ne!(
+            UnmodeledReason::UnrecognisedCommand,
+            UnmodeledReason::UnsupportedUsage
+        );
+        assert_ne!(
+            UnmodeledReason::UnrecognisedCommand,
+            UnmodeledReason::UnsupportedFlag {
+                flag: "-s".to_string()
+            }
+        );
+    }
+
+    // --- UnmodeledReason Display ---
+
+    #[test]
+    fn display_unrecognised_command_contains_first_word_of_command() {
+        // The Display for the whole Warning should contain the first word of the command.
+        let w = Warning::UnmodeledRunCommand {
+            command: "curl https://example.com".to_string(),
+            reason: UnmodeledReason::UnrecognisedCommand,
+        };
+        let s = w.to_string();
+        assert!(!s.is_empty());
+        assert!(
+            s.contains("curl"),
+            "display must contain first word 'curl', got: {s}"
+        );
+        assert!(
+            s.contains("curl https://example.com"),
+            "display must contain full command, got: {s}"
+        );
+    }
+
+    #[test]
+    fn display_unsupported_flag_contains_flag_name() {
+        let w = Warning::UnmodeledRunCommand {
+            command: "apt-get install --dry-run curl".to_string(),
+            reason: UnmodeledReason::UnsupportedFlag {
+                flag: "--dry-run".to_string(),
+            },
+        };
+        let s = w.to_string();
+        assert!(!s.is_empty());
+        assert!(
+            s.contains("--dry-run"),
+            "display must contain flag name '--dry-run', got: {s}"
+        );
+        assert!(
+            s.contains("apt-get install --dry-run curl"),
+            "display must contain full command, got: {s}"
+        );
+    }
+
+    #[test]
+    fn display_unsupported_usage_contains_command() {
+        let w = Warning::UnmodeledRunCommand {
+            command: "cp /a /b /c".to_string(),
+            reason: UnmodeledReason::UnsupportedUsage,
+        };
+        let s = w.to_string();
+        assert!(!s.is_empty());
+        assert!(
+            s.contains("cp /a /b /c"),
+            "display must contain command, got: {s}"
+        );
+        assert!(
+            s.contains("unsupported usage"),
+            "display must contain 'unsupported usage', got: {s}"
+        );
+    }
+
+    #[test]
+    fn display_unrecognised_command_contains_not_modeled() {
+        let w = Warning::UnmodeledRunCommand {
+            command: "make build".to_string(),
+            reason: UnmodeledReason::UnrecognisedCommand,
+        };
+        let s = w.to_string();
+        assert!(
+            s.contains("not modeled: make"),
+            "display must contain 'not modeled: make', got: {s}"
+        );
+    }
+
+    // --- Full-string Display format assertions ---
+    // These lock the exact user-visible output format against silent drift.
+
+    #[test]
+    fn display_unrecognised_command_full_string() {
+        let w = Warning::UnmodeledRunCommand {
+            command: "echo hello".to_string(),
+            reason: UnmodeledReason::UnrecognisedCommand,
+        };
+        assert_eq!(
+            w.to_string(),
+            "skipped RUN sub-command 'echo hello' (not modeled: echo)"
+        );
+    }
+
+    #[test]
+    fn display_unsupported_flag_full_string() {
+        let w = Warning::UnmodeledRunCommand {
+            command: "apt-get install --dry-run curl".to_string(),
+            reason: UnmodeledReason::UnsupportedFlag {
+                flag: "--dry-run".to_string(),
+            },
+        };
+        assert_eq!(
+            w.to_string(),
+            "skipped RUN sub-command 'apt-get install --dry-run curl' (unsupported flag: --dry-run)"
+        );
+    }
+
+    #[test]
+    fn display_unsupported_usage_full_string() {
+        let w = Warning::UnmodeledRunCommand {
+            command: "cp /a /b /c".to_string(),
+            reason: UnmodeledReason::UnsupportedUsage,
+        };
+        assert_eq!(
+            w.to_string(),
+            "skipped RUN sub-command 'cp /a /b /c' (unsupported usage)"
+        );
     }
 
     // --- Clone and PartialEq ---

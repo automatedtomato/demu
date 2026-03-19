@@ -7,17 +7,18 @@ Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 
 ## Up next
 
-- [ ] [#26](https://github.com/automatedtomato/demu/issues/26) chore: release distribution pipeline ← start here
-- [ ] [#19](https://github.com/automatedtomato/demu/issues/19) feat: RUN `&&`-chain parsing (prerequisite for RUN simulation)
-- [ ] [#20](https://github.com/automatedtomato/demu/issues/20) feat: RUN filesystem mutation simulation
-- [ ] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry
-- [ ] [#22](https://github.com/automatedtomato/demu/issues/22) feat: REPL `:installed` + `which`
-- [ ] [#23](https://github.com/automatedtomato/demu/issues/23) feat: REPL `apt list --installed` / `pip list`
-- [ ] [#24](https://github.com/automatedtomato/demu/issues/24) feat: REPL `:reload`
-- [ ] [#25](https://github.com/automatedtomato/demu/issues/25) feat: RUN skipped-command warnings
-
 ## Done
 
+- [x] [#25](https://github.com/automatedtomato/demu/issues/25) feat: RUN skipped-command warnings — merged [#36](https://github.com/automatedtomato/demu/pull/36)
+- [x] [#32](https://github.com/automatedtomato/demu/issues/32) refactor: extract `io_err` closure to shared helper — merged [#37](https://github.com/automatedtomato/demu/pull/37)
+- [x] [#33](https://github.com/automatedtomato/demu/issues/33) fix: sanitize env var keys/values in `env_cmd.rs` — merged [#38](https://github.com/automatedtomato/demu/pull/38)
+- [x] [#24](https://github.com/automatedtomato/demu/issues/24) feat: REPL `:reload` — merged [#35](https://github.com/automatedtomato/demu/pull/35)
+- [x] [#23](https://github.com/automatedtomato/demu/issues/23) feat: REPL `apt list --installed` / `pip list` — merged [#34](https://github.com/automatedtomato/demu/pull/34)
+- [x] [#22](https://github.com/automatedtomato/demu/issues/22) feat: REPL `:installed` + `which` — merged [#31](https://github.com/automatedtomato/demu/pull/31)
+- [x] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry — merged [#30](https://github.com/automatedtomato/demu/pull/30)
+- [x] [#20](https://github.com/automatedtomato/demu/issues/20) feat: RUN filesystem mutation simulation — merged [#29](https://github.com/automatedtomato/demu/pull/29)
+- [x] [#19](https://github.com/automatedtomato/demu/issues/19) feat: RUN `&&`-chain parsing — merged [#28](https://github.com/automatedtomato/demu/pull/28)
+- [x] [#26](https://github.com/automatedtomato/demu/issues/26) chore: release distribution pipeline — merged [#27](https://github.com/automatedtomato/demu/pull/27)
 - [x] Milestone planning and GitHub setup
 - [x] Design decisions: `tasks/decisions/001~003`
 - [x] Private repo + `main` / `develop` branches

@@ -201,20 +201,31 @@ fn test_run_history() {
         "expected 4 history entries (FROM + 3 RUN)"
     );
 
-    // Each RUN produces exactly one UnmodeledRunCommand warning.
+    // After #21: apt-get update → UnmodeledRunCommand, apt-get install → SimulatedInstall,
+    // echo → UnmodeledRunCommand. So 2 UnmodeledRunCommand + 1 SimulatedInstall = 3 total.
     let unmodeled_count = state
         .warnings
         .iter()
         .filter(|w| matches!(w, Warning::UnmodeledRunCommand { .. }))
         .count();
     assert_eq!(
-        unmodeled_count, 3,
-        "expected 3 UnmodeledRunCommand warnings (one per RUN)"
+        unmodeled_count, 2,
+        "expected 2 UnmodeledRunCommand warnings (apt-get update + echo)"
+    );
+
+    // apt-get install emits SimulatedInstall, not UnmodeledRunCommand.
+    let has_simulated_install = state
+        .warnings
+        .iter()
+        .any(|w| matches!(w, Warning::SimulatedInstall { manager, .. } if manager == "apt"));
+    assert!(
+        has_simulated_install,
+        "expected SimulatedInstall warning for 'apt-get install'"
     );
 
     // Verify the specific command text is preserved in warnings.
     let has_apt_update = state.warnings.iter().any(|w| {
-        matches!(w, Warning::UnmodeledRunCommand { command } if command.contains("apt-get update"))
+        matches!(w, Warning::UnmodeledRunCommand { command, .. } if command.contains("apt-get update"))
     });
     assert!(
         has_apt_update,
@@ -388,13 +399,14 @@ fn test_multi_instruction() {
         "expected 7 layer summaries (one per instruction)"
     );
 
-    // The RUN must have emitted one UnmodeledRunCommand warning.
+    // `npm install` with no package arguments is out of scope (reads package.json),
+    // so it falls through to UnmodeledRunCommand rather than SimulatedInstall.
     assert!(
         state
             .warnings
             .iter()
             .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. })),
-        "expected UnmodeledRunCommand warning from 'RUN npm install'"
+        "expected UnmodeledRunCommand warning from bare 'RUN npm install' (no packages)"
     );
 
     // Layer types must appear in the correct order.

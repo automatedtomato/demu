@@ -15,6 +15,9 @@ use thiserror::Error;
 #[derive(Debug, Error, PartialEq)]
 pub enum ReplError {
     /// The requested path does not exist in the virtual filesystem.
+    ///
+    /// Note: `path` stores the raw, unsanitized value. Callers must apply
+    /// `sanitize_for_terminal` before printing the display string to a terminal.
     #[error("no such file or directory: {path}")]
     PathNotFound { path: PathBuf },
 
@@ -35,10 +38,35 @@ pub enum ReplError {
     UnknownCommand { input: String },
 }
 
+/// Returns a closure that maps a [`std::io::Error`] into
+/// [`ReplError::InvalidArguments`] for the given command name.
+///
+/// This is a shared helper so that command handlers do not each have to
+/// define the same 3-line inline closure. Use it wherever a `writeln!` or
+/// similar I/O operation needs to map its error into `ReplError`:
+///
+/// ```ignore
+/// use crate::repl::error::io_err_mapper;
+///
+/// let io_err = io_err_mapper("apt");
+/// writeln!(writer, "...").map_err(&io_err)?;
+/// ```
+///
+/// The returned closure is `'static` — it owns an allocated `String` copy of
+/// `command` and has no lifetime dependency on the original `&str`.
+pub fn io_err_mapper(command: &str) -> impl Fn(std::io::Error) -> ReplError {
+    let command = command.to_owned();
+    move |e| ReplError::InvalidArguments {
+        command: command.clone(),
+        message: e.to_string(),
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::io;
     use std::path::PathBuf;
 
     // --- PathNotFound ---
@@ -123,5 +151,60 @@ mod tests {
         };
         let debug = format!("{err:?}");
         assert!(!debug.is_empty());
+    }
+
+    // --- io_err_mapper ---
+
+    /// `io_err_mapper` must produce `ReplError::InvalidArguments` with the
+    /// exact command name and the I/O error message string.
+    #[test]
+    fn io_err_mapper_produces_invalid_arguments_with_command_name() {
+        let mapper = io_err_mapper("test-cmd");
+        let raw_err = io::Error::new(io::ErrorKind::BrokenPipe, "broken pipe");
+        let err = mapper(raw_err);
+        assert_eq!(
+            err,
+            ReplError::InvalidArguments {
+                command: "test-cmd".to_string(),
+                message: "broken pipe".to_string(),
+            },
+            "io_err_mapper must wrap the io::Error into InvalidArguments; got: {err:?}"
+        );
+    }
+
+    /// `io_err_mapper` must be callable multiple times (the closure is `Fn`, not `FnOnce`).
+    #[test]
+    fn io_err_mapper_is_callable_multiple_times() {
+        let mapper = io_err_mapper("multi");
+        let e1 = mapper(io::Error::new(io::ErrorKind::Other, "first"));
+        let e2 = mapper(io::Error::new(io::ErrorKind::Other, "second"));
+        assert_eq!(
+            e1,
+            ReplError::InvalidArguments {
+                command: "multi".to_string(),
+                message: "first".to_string(),
+            }
+        );
+        assert_eq!(
+            e2,
+            ReplError::InvalidArguments {
+                command: "multi".to_string(),
+                message: "second".to_string(),
+            }
+        );
+    }
+
+    /// `io_err_mapper` must preserve the command name exactly (no truncation, no transforms).
+    #[test]
+    fn io_err_mapper_preserves_command_name_with_colon_prefix() {
+        let err = io_err_mapper(":reload")(io::Error::new(io::ErrorKind::Other, "oops"));
+        assert_eq!(
+            err,
+            ReplError::InvalidArguments {
+                command: ":reload".to_string(),
+                message: "oops".to_string(),
+            },
+            "colon-prefixed command name must be preserved; got: {err:?}"
+        );
     }
 }

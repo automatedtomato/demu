@@ -139,6 +139,44 @@ impl VirtualFs {
     pub fn iter(&self) -> impl Iterator<Item = (&PathBuf, &FsNode)> {
         self.nodes.iter()
     }
+
+    /// Remove the node at `path` and all descendant nodes.
+    ///
+    /// A path is considered a descendant when it has `path` as a
+    /// component-level prefix (i.e. `candidate.starts_with(path)`).
+    /// String-prefix siblings — such as `/appdata` when removing `/app` —
+    /// are NOT matched because `Path::starts_with` uses component-level
+    /// comparison, not byte-level.
+    ///
+    /// Returns the list of all paths that were actually removed.
+    pub fn remove_recursive(&mut self, path: &Path) -> Vec<PathBuf> {
+        // Collect all keys that are the target path itself or a descendant.
+        let to_remove: Vec<PathBuf> = self
+            .nodes
+            .keys()
+            .filter(|key| key.starts_with(path))
+            .cloned()
+            .collect();
+
+        // Remove each collected path and return the removed set.
+        for p in &to_remove {
+            self.nodes.remove(p);
+        }
+        to_remove
+    }
+
+    /// Clone all (path, node) pairs where `path` has `root` as a
+    /// component-level ancestor (i.e. `path.starts_with(root)`).
+    ///
+    /// The root node itself is included in the result. Returns an empty vec
+    /// when `root` does not exist in the filesystem.
+    pub fn clone_subtree(&self, root: &Path) -> Vec<(PathBuf, FsNode)> {
+        self.nodes
+            .iter()
+            .filter(|(path, _)| path.starts_with(root))
+            .map(|(path, node)| (path.clone(), node.clone()))
+            .collect()
+    }
 }
 
 /// Return `true` when `candidate` is a direct child of `parent`.
@@ -427,5 +465,110 @@ mod tests {
             FsNode::Symlink(s) => assert_eq!(s.target, PathBuf::from("/usr/bin/python3")),
             _ => panic!("expected Symlink"),
         }
+    }
+
+    // --- remove_recursive ---
+
+    #[test]
+    fn remove_recursive_removes_node_and_descendants() {
+        let mut fs = VirtualFs::new();
+        fs.insert(PathBuf::from("/app"), dir_node());
+        fs.insert(PathBuf::from("/app/main.rs"), file_node(b""));
+        fs.insert(PathBuf::from("/app/src"), dir_node());
+        fs.insert(PathBuf::from("/app/src/lib.rs"), file_node(b""));
+
+        let removed = fs.remove_recursive(Path::new("/app"));
+
+        assert!(!fs.contains(Path::new("/app")));
+        assert!(!fs.contains(Path::new("/app/main.rs")));
+        assert!(!fs.contains(Path::new("/app/src")));
+        assert!(!fs.contains(Path::new("/app/src/lib.rs")));
+        assert_eq!(removed.len(), 4);
+    }
+
+    #[test]
+    fn remove_recursive_does_not_remove_siblings() {
+        let mut fs = VirtualFs::new();
+        fs.insert(PathBuf::from("/app"), dir_node());
+        fs.insert(PathBuf::from("/app/main.rs"), file_node(b""));
+        fs.insert(PathBuf::from("/etc"), dir_node());
+        fs.insert(PathBuf::from("/etc/hosts"), file_node(b""));
+
+        fs.remove_recursive(Path::new("/app"));
+
+        // /etc and its children must be untouched
+        assert!(fs.contains(Path::new("/etc")));
+        assert!(fs.contains(Path::new("/etc/hosts")));
+    }
+
+    #[test]
+    fn remove_recursive_on_absent_path_returns_empty() {
+        let mut fs = VirtualFs::new();
+        let removed = fs.remove_recursive(Path::new("/nonexistent"));
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn remove_recursive_does_not_match_string_prefix_sibling() {
+        // Removing /app must NOT remove /appdata — they share a string prefix
+        // but /appdata is not a path-component descendant of /app.
+        let mut fs = VirtualFs::new();
+        fs.insert(PathBuf::from("/app"), dir_node());
+        fs.insert(PathBuf::from("/appdata"), dir_node());
+        fs.insert(PathBuf::from("/appdata/file.txt"), file_node(b""));
+
+        fs.remove_recursive(Path::new("/app"));
+
+        assert!(!fs.contains(Path::new("/app")));
+        assert!(fs.contains(Path::new("/appdata")));
+        assert!(fs.contains(Path::new("/appdata/file.txt")));
+    }
+
+    // --- clone_subtree ---
+
+    #[test]
+    fn clone_subtree_returns_root_and_descendants() {
+        let mut fs = VirtualFs::new();
+        fs.insert(PathBuf::from("/app"), dir_node());
+        fs.insert(PathBuf::from("/app/main.rs"), file_node(b"hello"));
+        fs.insert(PathBuf::from("/app/src"), dir_node());
+        fs.insert(PathBuf::from("/app/src/lib.rs"), file_node(b"world"));
+
+        let subtree = fs.clone_subtree(Path::new("/app"));
+
+        let paths: Vec<&PathBuf> = subtree.iter().map(|(p, _)| p).collect();
+        assert_eq!(subtree.len(), 4);
+        assert!(paths.contains(&&PathBuf::from("/app")));
+        assert!(paths.contains(&&PathBuf::from("/app/main.rs")));
+        assert!(paths.contains(&&PathBuf::from("/app/src")));
+        assert!(paths.contains(&&PathBuf::from("/app/src/lib.rs")));
+    }
+
+    #[test]
+    fn clone_subtree_returns_empty_for_absent_root() {
+        let fs = VirtualFs::new();
+        let subtree = fs.clone_subtree(Path::new("/nonexistent"));
+        assert!(subtree.is_empty());
+    }
+
+    #[test]
+    fn clone_subtree_excludes_string_prefix_siblings() {
+        // /appdata must not appear when cloning /app — they share a string prefix
+        // but /appdata is not a path-component descendant of /app.
+        let mut fs = VirtualFs::new();
+        fs.insert(PathBuf::from("/app"), dir_node());
+        fs.insert(PathBuf::from("/appdata"), dir_node());
+        fs.insert(PathBuf::from("/appdata/file.txt"), file_node(b""));
+
+        let subtree = fs.clone_subtree(Path::new("/app"));
+
+        let paths: Vec<&PathBuf> = subtree.iter().map(|(p, _)| p).collect();
+        assert_eq!(
+            subtree.len(),
+            1,
+            "only /app itself should be in the subtree"
+        );
+        assert!(paths.contains(&&PathBuf::from("/app")));
+        assert!(!paths.contains(&&PathBuf::from("/appdata")));
     }
 }
