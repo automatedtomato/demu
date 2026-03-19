@@ -4,7 +4,6 @@ Milestone: [Release v0.2.0](https://github.com/automatedtomato/demu/milestone/2)
 Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 
 ## In progress
-- [ ] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry
 
 ## Up next
 - [ ] [#22](https://github.com/automatedtomato/demu/issues/22) feat: REPL `:installed` + `which`
@@ -14,6 +13,7 @@ Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 
 ## Done
 
+- [x] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry — merged [#30](https://github.com/automatedtomato/demu/pull/30)
 - [x] [#20](https://github.com/automatedtomato/demu/issues/20) feat: RUN filesystem mutation simulation — merged [#29](https://github.com/automatedtomato/demu/pull/29)
 - [x] [#19](https://github.com/automatedtomato/demu/issues/19) feat: RUN `&&`-chain parsing — merged [#28](https://github.com/automatedtomato/demu/pull/28)
 - [x] [#26](https://github.com/automatedtomato/demu/issues/26) chore: release distribution pipeline — merged [#27](https://github.com/automatedtomato/demu/pull/27)
