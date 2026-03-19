@@ -22,3 +22,6 @@ Thumbs.db
 
 # Claude local settings (keep shared settings, exclude local overrides)
 .claude/settings.local.json
+
+# Private drafts — not for public repo
+private/

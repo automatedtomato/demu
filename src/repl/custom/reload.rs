@@ -65,14 +65,35 @@ pub fn execute(
     };
 
     // Step 3: Run the engine against the parsed instructions.
-    let new_state = match engine::run(instructions, &config.context_dir) {
-        Ok(s) => s,
+    let engine_output = match engine::run(instructions, &config.context_dir) {
+        Ok(output) => output,
         Err(e) => {
             let safe_msg = sanitize_for_terminal(&e.to_string());
             writeln!(err_writer, "demu: engine error: {safe_msg}")
                 .map_err(io_err_mapper(":reload"))?;
             return Ok(());
         }
+    };
+
+    // Step 3b: Re-apply the stage selection from startup, if any.
+    // If the selected stage no longer exists after reload (e.g. the user
+    // renamed or deleted it in the Dockerfile), emit a warning and fall back
+    // to the final stage so the REPL remains usable.
+    let new_state = if let Some(ref stage_name) = config.selected_stage {
+        match engine_output.stages.get(stage_name) {
+            Some(stage_state) => stage_state.clone(),
+            None => {
+                let safe_name = sanitize_for_terminal(stage_name);
+                writeln!(
+                    err_writer,
+                    "warning: stage '{safe_name}' no longer exists after reload; using final stage"
+                )
+                .map_err(io_err_mapper(":reload"))?;
+                engine_output.state
+            }
+        }
+    } else {
+        engine_output.state
     };
 
     // Step 4a: Emit warnings from the new state to err_writer.
@@ -363,6 +384,129 @@ mod tests {
         assert!(
             err.contains("warning"),
             "stderr must contain 'warning' from EmptyBaseImage; got: {err}"
+        );
+    }
+
+    // --- reload_with_stage_selection_restores_same_stage ---
+    //
+    // Two-stage Dockerfile: builder (ENV BUILD=1) and final (ENV FINAL=1).
+    // When config.selected_stage is "builder", reload must restore the builder
+    // stage state (BUILD=1, no FINAL=1), not the final stage.
+
+    #[test]
+    fn reload_with_stage_selection_restores_same_stage() {
+        let mut file = NamedTempFile::new().expect("tempfile");
+        write!(
+            file,
+            "FROM scratch AS builder\nENV BUILD=1\nFROM scratch\nENV FINAL=1\n"
+        )
+        .expect("write");
+
+        let config = ReplConfig::new(file.path().to_path_buf())
+            .with_selected_stage(Some("builder".to_string()));
+        let mut state = PreviewState::default();
+
+        let (result, out, _err) = run_reload(&mut state, &config);
+        assert!(result.is_ok(), "execute must return Ok; got: {result:?}");
+        assert!(
+            out.contains("Reloaded."),
+            "stdout must contain 'Reloaded.'; got: {out}"
+        );
+        assert_eq!(
+            state.env.get("BUILD").map(String::as_str),
+            Some("1"),
+            "state must be the builder stage (BUILD=1)"
+        );
+        assert!(
+            !state.env.contains_key("FINAL"),
+            "state must NOT be the final stage (no FINAL key)"
+        );
+    }
+
+    // --- reload_with_stage_selection_warns_when_stage_removed ---
+    //
+    // First load has a two-stage Dockerfile with "builder". After overwriting the
+    // file to a single-stage Dockerfile, reload must emit a warning that "builder"
+    // no longer exists and fall back to the final stage.
+
+    #[test]
+    fn reload_with_stage_selection_warns_when_stage_removed() {
+        let mut file = NamedTempFile::new().expect("tempfile");
+        // v1: two-stage, "builder" exists.
+        write!(
+            file,
+            "FROM scratch AS builder\nENV BUILD=1\nFROM scratch\nENV FINAL=1\n"
+        )
+        .expect("write v1");
+
+        let df_path = file.path().to_path_buf();
+        let config =
+            ReplConfig::new(df_path.clone()).with_selected_stage(Some("builder".to_string()));
+        let mut state = PreviewState::default();
+
+        // First reload succeeds with builder stage.
+        let (r1, _, _) = run_reload(&mut state, &config);
+        assert!(r1.is_ok());
+        assert!(state.env.contains_key("BUILD"), "v1: must have BUILD");
+
+        // Overwrite with a single-stage Dockerfile — "builder" is gone.
+        let mut f2 = std::fs::File::create(&df_path).expect("create v2");
+        write!(f2, "FROM scratch\nENV ONLY=1\n").expect("write v2");
+
+        // Second reload: "builder" not found — warning emitted, final stage used.
+        let (r2, _out, err) = run_reload(&mut state, &config);
+        assert!(
+            r2.is_ok(),
+            "execute must return Ok on missing stage; got: {r2:?}"
+        );
+        assert!(
+            err.contains("no longer exists after reload"),
+            "stderr must warn about missing stage; got: {err}"
+        );
+        assert_eq!(
+            state.env.get("ONLY").map(String::as_str),
+            Some("1"),
+            "state must fall back to the final stage (ONLY=1)"
+        );
+    }
+
+    // --- reload_with_context_and_stage_selection_restores_stage ---
+    //
+    // `ReplConfig::with_context` is used by tests that supply an explicit
+    // context directory (e.g. the engine-error test). Verify that chaining
+    // `.with_selected_stage` on a `with_context` config correctly re-applies
+    // the stage selection on reload, so the two constructors are equivalent
+    // from the reload perspective.
+
+    #[test]
+    fn reload_with_context_and_stage_selection_restores_stage() {
+        let ctx_dir = tempfile::TempDir::new().expect("tempdir");
+        let mut file = NamedTempFile::new().expect("tempfile");
+        write!(
+            file,
+            "FROM scratch AS builder\nENV CTX_BUILD=1\nFROM scratch\nENV CTX_FINAL=1\n"
+        )
+        .expect("write");
+
+        let config =
+            ReplConfig::with_context(file.path().to_path_buf(), ctx_dir.path().to_path_buf())
+                .with_selected_stage(Some("builder".to_string()));
+        let mut state = PreviewState::default();
+
+        let (result, out, _err) = run_reload(&mut state, &config);
+        assert!(result.is_ok(), "execute must return Ok; got: {result:?}");
+        assert!(
+            out.contains("Reloaded."),
+            "stdout must contain 'Reloaded.'; got: {out}"
+        );
+        assert_eq!(
+            state.env.get("CTX_BUILD").map(String::as_str),
+            Some("1"),
+            "state must be builder stage (CTX_BUILD=1)"
+        );
+        assert!(
+            !state.env.contains_key("CTX_FINAL"),
+            "state must NOT be final stage"
         );
     }
 }

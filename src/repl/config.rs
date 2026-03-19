@@ -8,9 +8,10 @@ use std::path::PathBuf;
 
 /// Session-level configuration for the REPL.
 ///
-/// Holds the fixed session metadata (Dockerfile path, build context directory)
-/// that the REPL needs to support `:reload`. These values are immutable after
-/// construction and are separate from `PreviewState`, which holds simulation output.
+/// Holds the fixed session metadata (Dockerfile path, build context directory,
+/// and optional stage selection) that the REPL needs to support `:reload`.
+/// These values are immutable after construction and are separate from
+/// `PreviewState`, which holds simulation output.
 pub struct ReplConfig {
     /// Absolute path to the Dockerfile being previewed.
     pub dockerfile_path: PathBuf,
@@ -19,6 +20,11 @@ pub struct ReplConfig {
     /// Derived automatically from `dockerfile_path.parent()` by `ReplConfig::new`.
     /// If a different context directory is required, use `ReplConfig::with_context`.
     pub context_dir: PathBuf,
+    /// The stage name or index selected via `--stage` at startup.
+    ///
+    /// `None` means "use the final stage" (default behavior).
+    /// `:reload` uses this to re-apply the same selection after re-running the engine.
+    pub selected_stage: Option<String>,
 }
 
 impl ReplConfig {
@@ -37,6 +43,7 @@ impl ReplConfig {
         Self {
             dockerfile_path,
             context_dir,
+            selected_stage: None,
         }
     }
 
@@ -49,7 +56,17 @@ impl ReplConfig {
         Self {
             dockerfile_path,
             context_dir,
+            selected_stage: None,
         }
+    }
+
+    /// Set the stage selection for this config.
+    ///
+    /// Called from `main` after `--stage` is parsed so that `:reload` can
+    /// re-apply the same stage selection each time the Dockerfile is reloaded.
+    pub fn with_selected_stage(mut self, stage: Option<String>) -> Self {
+        self.selected_stage = stage;
+        self
     }
 }
 

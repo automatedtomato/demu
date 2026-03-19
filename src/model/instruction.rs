@@ -13,8 +13,23 @@ pub enum CopySource {
     /// Source is a path on the host build context (v0.1 support).
     Host(PathBuf),
 
-    /// Source is a named build stage — reserved for multi-stage support in v0.3.
-    Stage(String),
+    /// Files copied from a named build stage via `COPY --from=<stage>`.
+    ///
+    /// `name` is the stage alias or numeric index string (e.g. `"builder"` or `"0"`).
+    /// `src_path` is the absolute path inside the source stage's virtual filesystem
+    /// that the engine will copy from when processing this instruction.
+    Stage {
+        /// The stage alias or numeric index string used in `--from=<name>`.
+        ///
+        /// Matched against `StageRegistry` keys: both aliases (e.g. `"builder"`)
+        /// and numeric index strings (e.g. `"0"`) are valid.
+        name: String,
+        /// The path inside the source stage's virtual filesystem to copy from.
+        ///
+        /// Relative paths are treated as absolute from the stage root (i.e.
+        /// a leading `/` is prepended if absent) when the engine resolves them.
+        src_path: PathBuf,
+    },
 }
 
 /// A single Dockerfile instruction, fully parsed and typed.
@@ -81,15 +96,27 @@ mod tests {
     }
 
     #[test]
-    fn copy_source_stage_stores_stage_name() {
-        let src = CopySource::Stage("builder".to_string());
-        assert_eq!(src, CopySource::Stage("builder".to_string()));
+    fn copy_source_stage_stores_name_and_src_path() {
+        let src = CopySource::Stage {
+            name: "builder".to_string(),
+            src_path: PathBuf::from("/out/app"),
+        };
+        assert_eq!(
+            src,
+            CopySource::Stage {
+                name: "builder".to_string(),
+                src_path: PathBuf::from("/out/app"),
+            }
+        );
     }
 
     #[test]
     fn copy_source_host_and_stage_are_not_equal() {
         let host = CopySource::Host(PathBuf::from("builder"));
-        let stage = CopySource::Stage("builder".to_string());
+        let stage = CopySource::Stage {
+            name: "builder".to_string(),
+            src_path: PathBuf::from("/out/app"),
+        };
         assert_ne!(host, stage);
     }
 
@@ -160,13 +187,19 @@ mod tests {
     #[test]
     fn instruction_copy_with_stage_source() {
         let inst = Instruction::Copy {
-            source: CopySource::Stage("builder".to_string()),
+            source: CopySource::Stage {
+                name: "builder".to_string(),
+                src_path: PathBuf::from("/out/app"),
+            },
             dest: PathBuf::from("/app/binary"),
         };
         assert_eq!(
             inst,
             Instruction::Copy {
-                source: CopySource::Stage("builder".to_string()),
+                source: CopySource::Stage {
+                    name: "builder".to_string(),
+                    src_path: PathBuf::from("/out/app"),
+                },
                 dest: PathBuf::from("/app/binary")
             }
         );

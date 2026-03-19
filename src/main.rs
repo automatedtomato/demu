@@ -28,18 +28,6 @@ use demu::{
 fn run_cli() -> Result<()> {
     let cli = Cli::parse();
 
-    // ── 0. Surface unimplemented flags early ─────────────────────────────────
-
-    // `--stage` is parsed by clap but not yet wired into the engine. Fail
-    // explicitly so the user knows their stage selection will not be honoured —
-    // proceeding silently would show the wrong stage without any indication.
-    if let Some(stage) = &cli.stage {
-        anyhow::bail!(
-            "--stage is not yet implemented (requested stage: '{stage}'); \
-             omit it to preview the final stage"
-        );
-    }
-
     // ── 1. Validate the path ─────────────────────────────────────────────────
 
     // The path must exist — surface a clear error rather than a confusing I/O
@@ -87,8 +75,37 @@ fn run_cli() -> Result<()> {
 
     // ── 5. Run the engine ────────────────────────────────────────────────────
 
-    let mut state = engine::run(instructions, &context_dir)
+    let output = engine::run(instructions, &context_dir)
         .with_context(|| format!("engine error while processing '{}'", canonical.display()))?;
+
+    // ── 5a. Select the target stage ──────────────────────────────────────────
+
+    // If `--stage` is provided, look it up in the registry (by name or numeric
+    // index). If omitted, use the final stage returned directly by the engine.
+    let mut state = if let Some(ref stage_name) = cli.stage {
+        output.stages.get(stage_name).cloned().ok_or_else(|| {
+            // Sanitize both the user-supplied stage name and the Dockerfile-derived
+            // alias strings before embedding them in the error message. The main
+            // handler applies sanitize_for_terminal as a final backstop, but
+            // sanitizing at construction keeps the error value clean regardless of
+            // where it is later consumed or logged.
+            let safe_name = sanitize_for_terminal(stage_name);
+            let available = output
+                .stages
+                .keys()
+                .into_iter()
+                .map(|k| sanitize_for_terminal(&k))
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow::anyhow!(
+                "stage '{}' not found; available stages: {}",
+                safe_name,
+                available
+            )
+        })?
+    } else {
+        output.state
+    };
 
     // ── 6. Print warnings to stderr ──────────────────────────────────────────
 
@@ -105,7 +122,7 @@ fn run_cli() -> Result<()> {
 
     // Build the session-level config that the REPL needs for `:reload`.
     // The canonical path and context_dir are already computed above.
-    let repl_config = ReplConfig::new(canonical);
+    let repl_config = ReplConfig::new(canonical).with_selected_stage(cli.stage.clone());
 
     run_repl(&mut state, &repl_config)?;
 
