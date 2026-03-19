@@ -4,9 +4,9 @@ Milestone: [Release v0.2.0](https://github.com/automatedtomato/demu/milestone/2)
 Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 
 ## In progress
+- [ ] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry
 
 ## Up next
-- [ ] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry
 - [ ] [#22](https://github.com/automatedtomato/demu/issues/22) feat: REPL `:installed` + `which`
 - [ ] [#23](https://github.com/automatedtomato/demu/issues/23) feat: REPL `apt list --installed` / `pip list`
 - [ ] [#24](https://github.com/automatedtomato/demu/issues/24) feat: REPL `:reload`
