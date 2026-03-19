@@ -15,7 +15,7 @@ use crate::model::{
     fs::{DirNode, FileNode, FsNode},
     provenance::{Provenance, ProvenanceSource},
     state::{LayerSummary, PreviewState},
-    warning::Warning,
+    warning::{UnmodeledReason, Warning},
 };
 
 // ─── Internal types ───────────────────────────────────────────────────────────
@@ -153,9 +153,10 @@ fn handle_mkdir(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubCo
             // No -p: parent must already exist.
             let parent = path.parent().unwrap_or(Path::new("/"));
             if !state.fs.contains(parent) && parent != Path::new("/") {
-                // Parent does not exist — emit warning and skip.
+                // Parent does not exist — the usage is not modeled without -p.
                 state.warnings.push(Warning::UnmodeledRunCommand {
                     command: sub_cmd.to_string(),
+                    reason: UnmodeledReason::UnsupportedUsage,
                 });
                 continue;
             }
@@ -228,7 +229,7 @@ fn handle_touch(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubCo
 /// "missing-is-ok" behaviour (which is the default anyway). Combined
 /// short flags such as `-rf`, `-fr`, or `-Rf` are also recognised.
 /// Missing paths are silently ignored.
-fn handle_rm(state: &mut PreviewState, argv: &[&str], _sub_cmd: &str) -> SubCommandResult {
+fn handle_rm(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubCommandResult {
     let flags: Vec<&str> = argv
         .iter()
         .copied()
@@ -251,8 +252,12 @@ fn handle_rm(state: &mut PreviewState, argv: &[&str], _sub_cmd: &str) -> SubComm
         // mistake; either way, wiping the entire virtual filesystem silently would
         // produce confusing results with no diagnostic.
         if recursive && path == Path::new("/") {
+            // Wiping the root silently would produce confusing results —
+            // emit UnsupportedUsage so the user knows this was not applied.
+            // Use the original sub_cmd text so the user sees exactly what was written.
             state.warnings.push(Warning::UnmodeledRunCommand {
-                command: format!("rm {} /", raw_path),
+                command: sub_cmd.to_string(),
+                reason: UnmodeledReason::UnsupportedUsage,
             });
             continue;
         }
@@ -284,8 +289,10 @@ fn handle_mv(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubComma
         .filter(|a| !a.starts_with('-'))
         .collect();
     if args.len() != 2 {
+        // mv with other than 2 positional args is outside the modeled subset.
         state.warnings.push(Warning::UnmodeledRunCommand {
             command: sub_cmd.to_string(),
+            reason: UnmodeledReason::UnsupportedUsage,
         });
         return SubCommandResult::empty();
     }
@@ -295,8 +302,10 @@ fn handle_mv(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubComma
 
     // Source must exist in the filesystem.
     if !state.fs.contains(&src) {
+        // Source not found — this usage is not modeled (would fail at runtime too).
         state.warnings.push(Warning::UnmodeledRunCommand {
             command: sub_cmd.to_string(),
+            reason: UnmodeledReason::UnsupportedUsage,
         });
         return SubCommandResult::empty();
     }
@@ -369,8 +378,10 @@ fn handle_cp(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubComma
     let recursive = has_recursive_flag(&flags);
 
     if args.len() != 2 {
+        // cp with other than 2 positional args is outside the modeled subset.
         state.warnings.push(Warning::UnmodeledRunCommand {
             command: sub_cmd.to_string(),
+            reason: UnmodeledReason::UnsupportedUsage,
         });
         return SubCommandResult::empty();
     }
@@ -380,8 +391,10 @@ fn handle_cp(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubComma
 
     // Source must exist in the filesystem.
     if !state.fs.contains(&src) {
+        // Source not found — this usage is not modeled.
         state.warnings.push(Warning::UnmodeledRunCommand {
             command: sub_cmd.to_string(),
+            reason: UnmodeledReason::UnsupportedUsage,
         });
         return SubCommandResult::empty();
     }
@@ -395,9 +408,10 @@ fn handle_cp(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubComma
     let src_is_dir = matches!(state.fs.get(&src), Some(FsNode::Directory(_)));
 
     if src_is_dir && !recursive {
-        // Directory copy without -r is not supported.
+        // Directory copy without -r flag is an unsupported usage pattern.
         state.warnings.push(Warning::UnmodeledRunCommand {
             command: sub_cmd.to_string(),
+            reason: UnmodeledReason::UnsupportedUsage,
         });
         return SubCommandResult::empty();
     }
@@ -483,6 +497,30 @@ fn split_commands(raw: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Return the set of dry-run / simulate flags for a given package manager.
+///
+/// Each manager has different flag conventions. Using a per-manager list prevents
+/// false positives: for example, `-s` is a dry-run alias in apt-get and apk but
+/// has a completely different meaning in pip (or is unrecognised in npm).
+///
+/// When any returned flag appears in an install command, the install would not
+/// actually execute in a real shell. Emitting `UnsupportedFlag` and NOT recording
+/// packages reflects this semantics accurately.
+fn dry_run_flags_for(manager: &str) -> &'static [&'static str] {
+    match manager {
+        // apt-get / apt: --dry-run, --simulate, -s (short alias), --just-print
+        "apt" => &["--dry-run", "--simulate", "-s", "--just-print"],
+        // apk: --dry-run and --simulate; -s is also a simulate alias in apk
+        "apk" => &["--dry-run", "--simulate", "-s"],
+        // pip / pip3: only --dry-run; -s is not a dry-run flag in pip
+        "pip" => &["--dry-run"],
+        // npm: only --dry-run; -s is --silent in npm, not a dry-run flag
+        "npm" => &["--dry-run"],
+        // Unknown/future managers: recognise the universal --dry-run only
+        _ => &["--dry-run"],
+    }
+}
+
 /// Handle a package install sub-command for any supported package manager.
 ///
 /// `manager` is the canonical registry key (e.g. "apt", "pip", "npm", "apk").
@@ -492,11 +530,13 @@ fn split_commands(raw: &str) -> Vec<&str> {
 /// (e.g. `&["install"]` for apt/pip/npm, `&["add"]` for apk).
 ///
 /// Logic:
-/// 1. Scan `argv` for the first token matching an install keyword. If none found,
-///    the command is unmodeled (e.g. `apt-get update`).
-/// 2. Collect tokens after the keyword, stripping any that start with `-`.
-/// 3. If no packages remain after stripping, the command is unmodeled.
-/// 4. Record each package in the registry and emit a `SimulatedInstall` warning.
+/// 1. Scan `argv` for dry-run/simulate flags BEFORE any other processing. If found,
+///    emit `UnsupportedFlag` and return without recording packages.
+/// 2. Scan `argv` for the first token matching an install keyword. If none found,
+///    emit `UnrecognisedCommand` (e.g. `apt-get update`).
+/// 3. Collect tokens after the keyword, stripping any that start with `-`.
+/// 4. If no packages remain after stripping, the command is unmodeled.
+/// 5. Record each package in the registry and emit a `SimulatedInstall` warning.
 fn handle_package_install(
     state: &mut PreviewState,
     manager: &str,
@@ -504,7 +544,20 @@ fn handle_package_install(
     sub_cmd: &str,
     install_keywords: &[&str],
 ) -> SubCommandResult {
-    // Find the index of the first install keyword in argv.
+    // Step 1: Detect dry-run/simulate flags before doing anything else.
+    // These flags prevent any real installation, so we must not record packages.
+    // Use per-manager flags to avoid false positives (e.g. `-s` in pip is not dry-run).
+    if let Some(dry_flag) = argv.iter().find(|t| dry_run_flags_for(manager).contains(t)) {
+        state.warnings.push(Warning::UnmodeledRunCommand {
+            command: sub_cmd.to_string(),
+            reason: UnmodeledReason::UnsupportedFlag {
+                flag: dry_flag.to_string(),
+            },
+        });
+        return SubCommandResult::empty();
+    }
+
+    // Step 2: Find the index of the first install keyword in argv.
     let keyword_pos = argv
         .iter()
         .position(|token| install_keywords.contains(token));
@@ -512,15 +565,16 @@ fn handle_package_install(
     let keyword_idx = match keyword_pos {
         Some(idx) => idx,
         None => {
-            // No install keyword found — this is an unmodeled sub-command (e.g. apt-get update).
+            // No install keyword found — unrecognised sub-command (e.g. apt-get update).
             state.warnings.push(Warning::UnmodeledRunCommand {
                 command: sub_cmd.to_string(),
+                reason: UnmodeledReason::UnrecognisedCommand,
             });
             return SubCommandResult::empty();
         }
     };
 
-    // Collect tokens after the keyword, filtering out flag tokens (those starting with '-').
+    // Step 3: Collect tokens after the keyword, filtering out flag tokens (starting with '-').
     let packages: Vec<String> = argv[keyword_idx + 1..]
         .iter()
         .filter(|token| !token.starts_with('-'))
@@ -528,20 +582,22 @@ fn handle_package_install(
         .collect();
 
     if packages.is_empty() {
-        // No package names after stripping flags — unmodeled (e.g. `apt-get install -y`).
+        // No package names after stripping flags — unmodeled usage (e.g. `apt-get install -y`).
         state.warnings.push(Warning::UnmodeledRunCommand {
             command: sub_cmd.to_string(),
+            reason: UnmodeledReason::UnsupportedUsage,
         });
         return SubCommandResult::empty();
     }
 
-    // Record each package in the installed registry under the canonical manager key.
+    // Step 4: Record each package in the installed registry under the canonical manager key.
     // `record()` returns false for unrecognised manager names — emit an UnmodeledRunCommand
     // so the user knows nothing was stored, rather than silently dropping the install.
     for pkg in &packages {
         if !state.installed.record(manager, pkg.clone()) {
             state.warnings.push(Warning::UnmodeledRunCommand {
                 command: sub_cmd.to_string(),
+                reason: UnmodeledReason::UnsupportedUsage,
             });
             return SubCommandResult::empty();
         }
@@ -587,9 +643,11 @@ fn dispatch_sub_command(state: &mut PreviewState, sub_cmd: &str) -> SubCommandRe
         // apk uses "add" as its install keyword.
         "apk" => handle_package_install(state, "apk", &argv[1..], sub_cmd, &["add"]),
         _ => {
-            // Record the sub-command as unmodeled so the user sees it in warnings.
+            // Command name not in the modeled set — emit UnrecognisedCommand so the
+            // user can see which binary was skipped.
             state.warnings.push(Warning::UnmodeledRunCommand {
                 command: sub_cmd.to_string(),
+                reason: UnmodeledReason::UnrecognisedCommand,
             });
             SubCommandResult::empty()
         }
@@ -644,7 +702,7 @@ mod tests {
         handle_run(&mut state, "echo hello", 1);
 
         let has_warning = state.warnings.iter().any(
-            |w| matches!(w, Warning::UnmodeledRunCommand { command } if command == "echo hello"),
+            |w| matches!(w, Warning::UnmodeledRunCommand { command, .. } if command == "echo hello"),
         );
         assert!(has_warning, "expected UnmodeledRunCommand warning");
     }
@@ -777,7 +835,7 @@ mod tests {
         assert!(
             matches!(
                 &state.warnings[0],
-                Warning::UnmodeledRunCommand { command } if command == "apt-get update"
+                Warning::UnmodeledRunCommand { command, .. } if command == "apt-get update"
             ),
             "first warning should be UnmodeledRunCommand for 'apt-get update', got: {:?}",
             state.warnings[0]
@@ -806,15 +864,15 @@ mod tests {
         );
         // Verify each warning carries the correct command text, not just the count.
         assert!(
-            matches!(&state.warnings[0], Warning::UnmodeledRunCommand { command } if command == "echo a"),
+            matches!(&state.warnings[0], Warning::UnmodeledRunCommand { command, .. } if command == "echo a"),
             "first warning should be for 'echo a'"
         );
         assert!(
-            matches!(&state.warnings[1], Warning::UnmodeledRunCommand { command } if command == "echo b"),
+            matches!(&state.warnings[1], Warning::UnmodeledRunCommand { command, .. } if command == "echo b"),
             "second warning should be for 'echo b'"
         );
         assert!(
-            matches!(&state.warnings[2], Warning::UnmodeledRunCommand { command } if command == "echo c"),
+            matches!(&state.warnings[2], Warning::UnmodeledRunCommand { command, .. } if command == "echo c"),
             "third warning should be for 'echo c'"
         );
     }
@@ -849,7 +907,7 @@ mod tests {
         assert!(
             matches!(
                 &state.warnings[0],
-                Warning::UnmodeledRunCommand { command } if command == "cmd1 || fallback"
+                Warning::UnmodeledRunCommand { command, .. } if command == "cmd1 || fallback"
             ),
             "full '||' token must be preserved in the single warning"
         );
@@ -883,7 +941,7 @@ mod tests {
         assert!(
             matches!(
                 &state.warnings[0],
-                Warning::UnmodeledRunCommand { command } if command == "echo hello"
+                Warning::UnmodeledRunCommand { command, .. } if command == "echo hello"
             ),
             "warning command text must match the input"
         );
@@ -1083,7 +1141,7 @@ mod tests {
         let has_rm_warning = state
             .warnings
             .iter()
-            .any(|w| matches!(w, Warning::UnmodeledRunCommand { command } if command == "rm /nonexistent"));
+            .any(|w| matches!(w, Warning::UnmodeledRunCommand { command, .. } if command == "rm /nonexistent"));
         assert!(!has_rm_warning);
     }
 
@@ -1149,11 +1207,19 @@ mod tests {
     fn run_mv_missing_source_emits_warning() {
         let mut state = PreviewState::default();
         handle_run(&mut state, "mv /nonexistent /dest", 1);
-        let has_unmodeled = state
-            .warnings
-            .iter()
-            .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. }));
-        assert!(has_unmodeled, "mv with missing source must emit warning");
+        let has_unmodeled = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_unmodeled,
+            "mv with missing source must emit UnsupportedUsage warning"
+        );
     }
 
     // ── cp tests ──────────────────────────────────────────────────────────
@@ -1199,13 +1265,18 @@ mod tests {
             }),
         );
         handle_run(&mut state, "cp /srcdir /dstdir", 1);
-        let has_unmodeled = state
-            .warnings
-            .iter()
-            .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. }));
+        let has_unmodeled = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                    ..
+                }
+            )
+        });
         assert!(
             has_unmodeled,
-            "cp on directory without -r must emit UnmodeledRunCommand"
+            "cp on directory without -r must emit UnsupportedUsage"
         );
     }
 
@@ -1213,11 +1284,19 @@ mod tests {
     fn run_cp_missing_source_emits_warning() {
         let mut state = PreviewState::default();
         handle_run(&mut state, "cp /nonexistent /dst", 1);
-        let has_unmodeled = state
-            .warnings
-            .iter()
-            .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. }));
-        assert!(has_unmodeled, "cp with missing source must emit warning");
+        let has_unmodeled = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_unmodeled,
+            "cp with missing source must emit UnsupportedUsage warning"
+        );
     }
 
     // ── mkdir without -p, missing parent ──────────────────────────────────
@@ -1225,7 +1304,7 @@ mod tests {
     #[test]
     fn run_mkdir_without_p_emits_warning_when_parent_absent() {
         // `mkdir /missing/child` — parent `/missing` does not exist and no -p flag.
-        // The handler must emit UnmodeledRunCommand and must NOT create the directory.
+        // The handler must emit UnmodeledRunCommand with UnsupportedUsage and must NOT create the directory.
         let mut state = PreviewState::default();
         handle_run(&mut state, "mkdir /missing/child", 1);
         assert!(
@@ -1233,11 +1312,16 @@ mod tests {
             "directory must not be created when parent is absent and -p is omitted"
         );
         assert!(
-            state
-                .warnings
-                .iter()
-                .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. })),
-            "mkdir without -p on absent parent must emit UnmodeledRunCommand"
+            state.warnings.iter().any(|w| {
+                matches!(
+                    w,
+                    Warning::UnmodeledRunCommand {
+                        reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                        ..
+                    }
+                )
+            }),
+            "mkdir without -p on absent parent must emit UnsupportedUsage"
         );
     }
 
@@ -1266,11 +1350,16 @@ mod tests {
         let mut state = PreviewState::default();
         handle_run(&mut state, "mv /only-one", 1);
         assert!(
-            state
-                .warnings
-                .iter()
-                .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. })),
-            "mv with one argument must emit UnmodeledRunCommand"
+            state.warnings.iter().any(|w| {
+                matches!(
+                    w,
+                    Warning::UnmodeledRunCommand {
+                        reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                        ..
+                    }
+                )
+            }),
+            "mv with one argument must emit UnsupportedUsage"
         );
     }
 
@@ -1287,11 +1376,16 @@ mod tests {
             "mv with three args must not mutate the filesystem"
         );
         assert!(
-            state
-                .warnings
-                .iter()
-                .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. })),
-            "mv with three args must emit UnmodeledRunCommand"
+            state.warnings.iter().any(|w| {
+                matches!(
+                    w,
+                    Warning::UnmodeledRunCommand {
+                        reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                        ..
+                    }
+                )
+            }),
+            "mv with three args must emit UnsupportedUsage"
         );
     }
 
@@ -1311,13 +1405,26 @@ mod tests {
             node_count_before,
             "rm -rf / must not remove any nodes from the virtual filesystem"
         );
+        // Must emit UnsupportedUsage with the original command text preserved.
+        let warning = state.warnings.iter().find(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                    ..
+                }
+            )
+        });
         assert!(
-            state
-                .warnings
-                .iter()
-                .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. })),
-            "rm -rf / must emit UnmodeledRunCommand"
+            warning.is_some(),
+            "rm -rf / must emit UnsupportedUsage warning"
         );
+        if let Some(Warning::UnmodeledRunCommand { command, .. }) = warning {
+            assert_eq!(
+                command, "rm -rf /",
+                "warning must preserve original command text, got: {command}"
+            );
+        }
     }
 
     // ── has_recursive_flag unit tests ──────────────────────────────────────
@@ -1668,20 +1775,25 @@ mod tests {
     #[test]
     fn apt_get_install_flags_only_emits_unmodeled_run_command() {
         // "apt-get install -y" has the install keyword but no package names after
-        // flag-stripping → falls through to UnmodeledRunCommand and records nothing.
+        // flag-stripping → falls through to UnsupportedUsage and records nothing.
         let mut state = PreviewState::default();
         handle_run(&mut state, "apt-get install -y", 1);
         assert!(
             state.installed.list("apt").is_empty(),
             "no packages must be recorded when only flags are present"
         );
-        let has_unmodeled = state
-            .warnings
-            .iter()
-            .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. }));
+        let has_unmodeled = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                    ..
+                }
+            )
+        });
         assert!(
             has_unmodeled,
-            "apt-get install with flags only must emit UnmodeledRunCommand"
+            "apt-get install with flags only must emit UnsupportedUsage"
         );
         let has_simulated = state
             .warnings
@@ -1694,6 +1806,36 @@ mod tests {
     }
 
     #[test]
+    fn pip_install_dash_s_records_packages_not_dry_run() {
+        // `-s` is a dry-run flag for apt-get but NOT for pip.
+        // `pip install -s requests` should record `requests` as installed.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "pip install -s requests", 1);
+        assert!(
+            state
+                .installed
+                .list("pip")
+                .contains(&"requests".to_string()),
+            "pip install -s must record 'requests' (not treated as dry-run), got: {:?}",
+            state.installed.list("pip")
+        );
+        // Must NOT emit UnsupportedFlag for -s on pip.
+        let has_unsupported_flag = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedFlag { .. },
+                    ..
+                }
+            )
+        });
+        assert!(
+            !has_unsupported_flag,
+            "pip install -s must not emit UnsupportedFlag (not a dry-run flag for pip)"
+        );
+    }
+
+    #[test]
     fn semicolon_chain_install_records_packages() {
         // `;`-separated chains must work the same as `&&`-separated chains.
         let mut state = PreviewState::default();
@@ -1702,6 +1844,171 @@ mod tests {
             state.installed.list("apt"),
             vec!["curl"],
             "install after semicolon-separated update must record packages"
+        );
+    }
+
+    // ── UnmodeledReason variant tests (#25) ───────────────────────────────
+
+    #[test]
+    fn echo_hello_emits_unrecognised_command_reason() {
+        // `echo` is not in the modeled set → dispatch fallthrough → UnrecognisedCommand.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "echo hello", 1);
+
+        let has_expected = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    command,
+                    reason: crate::model::warning::UnmodeledReason::UnrecognisedCommand,
+                } if command == "echo hello"
+            )
+        });
+        assert!(
+            has_expected,
+            "echo hello must emit UnmodeledRunCommand with UnrecognisedCommand reason, got: {:?}",
+            state.warnings
+        );
+    }
+
+    #[test]
+    fn apt_get_update_emits_unrecognised_command_reason() {
+        // `apt-get update` reaches handle_package_install but has no install keyword
+        // → must emit UnrecognisedCommand (not UnsupportedUsage).
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get update", 1);
+
+        let has_expected = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    command,
+                    reason: crate::model::warning::UnmodeledReason::UnrecognisedCommand,
+                } if command == "apt-get update"
+            )
+        });
+        assert!(
+            has_expected,
+            "apt-get update must emit UnmodeledRunCommand with UnrecognisedCommand reason, got: {:?}",
+            state.warnings
+        );
+    }
+
+    #[test]
+    fn apt_get_install_dry_run_emits_unsupported_flag_reason() {
+        // `apt-get install --dry-run curl` — `--dry-run` is a dry-run flag that prevents
+        // any actual installation; we emit UnsupportedFlag and do NOT record packages.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get install --dry-run curl", 1);
+
+        let has_expected = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    command,
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedFlag { flag },
+                } if command.contains("--dry-run") && flag == "--dry-run"
+            )
+        });
+        assert!(
+            has_expected,
+            "apt-get install --dry-run must emit UnsupportedFlag reason, got: {:?}",
+            state.warnings
+        );
+
+        // Must NOT record the package, since dry-run means no actual install.
+        assert!(
+            state.installed.list("apt").is_empty(),
+            "dry-run install must not record packages, got: {:?}",
+            state.installed.list("apt")
+        );
+    }
+
+    #[test]
+    fn apt_get_install_simulate_flag_emits_unsupported_flag_reason() {
+        // Short alias `-s` for simulate also prevents recording packages.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get install -s wget", 1);
+
+        let has_expected = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedFlag { .. },
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_expected,
+            "apt-get install -s must emit UnsupportedFlag reason, got: {:?}",
+            state.warnings
+        );
+
+        assert!(
+            state.installed.list("apt").is_empty(),
+            "simulate install (-s) must not record packages"
+        );
+    }
+
+    #[test]
+    fn cp_three_args_emits_unsupported_usage_reason() {
+        // `cp /a /b /c` (3 positional args) is not modeled → UnsupportedUsage.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "cp /a /b /c", 1);
+
+        let has_expected = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_expected,
+            "cp with 3 args must emit UnmodeledRunCommand with UnsupportedUsage reason, got: {:?}",
+            state.warnings
+        );
+    }
+
+    #[test]
+    fn mkdir_missing_parent_emits_unsupported_usage_reason() {
+        // `mkdir /deep/path` without `-p` and parent `/deep` absent → UnsupportedUsage.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "mkdir /deep/path", 1);
+
+        let has_expected = state.warnings.iter().any(|w| {
+            matches!(
+                w,
+                Warning::UnmodeledRunCommand {
+                    reason: crate::model::warning::UnmodeledReason::UnsupportedUsage,
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_expected,
+            "mkdir without -p on absent parent must emit UnsupportedUsage reason, got: {:?}",
+            state.warnings
+        );
+    }
+
+    #[test]
+    fn apt_get_install_dry_run_no_simulated_install_warning() {
+        // When dry-run flag is detected, no SimulatedInstall warning must be emitted.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get install --dry-run curl wget", 1);
+
+        let has_simulated = state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::SimulatedInstall { .. }));
+        assert!(
+            !has_simulated,
+            "dry-run must not emit SimulatedInstall warning, got: {:?}",
+            state.warnings
         );
     }
 }

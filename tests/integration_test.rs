@@ -225,7 +225,7 @@ fn test_run_history() {
 
     // Verify the specific command text is preserved in warnings.
     let has_apt_update = state.warnings.iter().any(|w| {
-        matches!(w, Warning::UnmodeledRunCommand { command } if command.contains("apt-get update"))
+        matches!(w, Warning::UnmodeledRunCommand { command, .. } if command.contains("apt-get update"))
     });
     assert!(
         has_apt_update,
