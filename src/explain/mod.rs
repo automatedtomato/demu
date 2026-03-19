@@ -11,6 +11,7 @@ use crate::model::{
     provenance::{MountInfo, MountKind, ProvenanceSource},
     state::PreviewState,
 };
+use crate::output::sanitize::sanitize_for_terminal;
 
 /// Error type for the explain module.
 #[derive(Debug, PartialEq)]
@@ -57,11 +58,7 @@ pub fn explain_path(state: &PreviewState, path: &Path) -> Result<String, Explain
     let modified_line = if prov.modified_by.is_empty() {
         "Modified by:  (none)".to_string()
     } else {
-        let mut parts: Vec<String> = prov
-            .modified_by
-            .iter()
-            .map(format_source)
-            .collect();
+        let mut parts: Vec<String> = prov.modified_by.iter().map(format_source).collect();
 
         // First entry gets the label; subsequent entries are aligned to match.
         let first = format!("Modified by:  {}", parts.remove(0));
@@ -89,29 +86,47 @@ pub fn explain_path(state: &PreviewState, path: &Path) -> Result<String, Explain
 /// Format a single `ProvenanceSource` as a human-readable string.
 ///
 /// Each variant maps to a compact description that fits on one terminal line.
+/// User-supplied fields (image names, paths, command text, env keys/values,
+/// stage names) are sanitized with `sanitize_for_terminal` to prevent ANSI
+/// escape injection when the result is written to a terminal.
 fn format_source(source: &ProvenanceSource) -> String {
     match source {
-        ProvenanceSource::FromImage { image } => format!("base image: {image}"),
+        ProvenanceSource::FromImage { image } => {
+            format!("base image: {}", sanitize_for_terminal(image))
+        }
         ProvenanceSource::Workdir => "WORKDIR instruction".to_string(),
         ProvenanceSource::CopyFromHost { host_path } => {
-            format!("COPY from host: {}", host_path.display())
+            let safe = sanitize_for_terminal(&host_path.display().to_string());
+            format!("COPY from host: {safe}")
         }
-        ProvenanceSource::CopyFromStage { stage } => format!("COPY from stage '{stage}'"),
-        ProvenanceSource::RunCommand { command } => format!("RUN command: {command}"),
-        ProvenanceSource::EnvSet { key, value } => format!("ENV {key}={value}"),
+        ProvenanceSource::CopyFromStage { stage } => {
+            format!("COPY from stage '{}'", sanitize_for_terminal(stage))
+        }
+        ProvenanceSource::RunCommand { command } => {
+            format!("RUN command: {}", sanitize_for_terminal(command))
+        }
+        ProvenanceSource::EnvSet { key, value } => {
+            format!(
+                "ENV {}={}",
+                sanitize_for_terminal(key),
+                sanitize_for_terminal(value)
+            )
+        }
     }
 }
 
 /// Format a `MountInfo` as a human-readable string.
 ///
 /// The output describes the kind of mount and the source path or name.
+/// The `source` field is user-supplied and sanitized before interpolation.
 fn format_mount(mount: &MountInfo) -> String {
+    let safe_source = sanitize_for_terminal(&mount.source);
     match mount.mount_type {
-        MountKind::Bind => format!("bind mount from {}", mount.source),
-        MountKind::Volume => format!("volume mount: {}", mount.source),
+        MountKind::Bind => format!("bind mount from {safe_source}"),
+        MountKind::Volume => format!("volume mount: {safe_source}"),
         MountKind::Tmpfs => "tmpfs mount".to_string(),
-        MountKind::Cache => format!("cache mount from {}", mount.source),
-        MountKind::Secret => format!("secret mount: {}", mount.source),
+        MountKind::Cache => format!("cache mount from {safe_source}"),
+        MountKind::Secret => format!("secret mount: {safe_source}"),
     }
 }
 
@@ -368,6 +383,51 @@ mod tests {
             mount_type: MountKind::Secret,
         };
         assert_eq!(format_mount(&mount), "secret mount: mysecret");
+    }
+
+    // --- sanitization of user-controlled fields ---
+
+    #[test]
+    fn format_source_strips_ansi_escape_in_run_command() {
+        // A crafted RUN command containing an ANSI escape sequence must not
+        // pass raw ESC bytes through to the terminal output.
+        let source = ProvenanceSource::RunCommand {
+            command: "touch \x1b[2J /app/flag".to_string(),
+        };
+        let result = format_source(&source);
+        assert!(
+            !result.contains('\x1b'),
+            "ESC byte must be stripped; got: {result:?}"
+        );
+        assert!(
+            result.contains("RUN command:"),
+            "label must survive; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_source_strips_ansi_escape_in_image_name() {
+        let source = ProvenanceSource::FromImage {
+            image: "ubuntu\x1b[1m:22.04".to_string(),
+        };
+        let result = format_source(&source);
+        assert!(
+            !result.contains('\x1b'),
+            "ESC byte must be stripped; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn format_mount_strips_ansi_escape_in_source() {
+        let mount = MountInfo {
+            source: "/host/\x1b[2Jpath".to_string(),
+            mount_type: MountKind::Bind,
+        };
+        let result = format_mount(&mount);
+        assert!(
+            !result.contains('\x1b'),
+            "ESC byte must be stripped; got: {result:?}"
+        );
     }
 
     // --- ExplainError::Display ---
