@@ -23,8 +23,8 @@ use crate::model::{
 /// Accumulated changes produced by a single sub-command dispatch.
 ///
 /// `files_changed` is populated by filesystem-mutating commands (mkdir, touch,
-/// rm, mv, cp). `env_changed` is reserved for future env-mutating commands.
-/// Issue #21 will populate env_changed for `export`/`ENV`-style sub-commands.
+/// rm, mv, cp). `env_changed` is reserved for future env-mutating commands
+/// such as `export` or inline variable assignments.
 struct SubCommandResult {
     /// Filesystem paths created, modified, or removed by the sub-command.
     files_changed: Vec<PathBuf>,
@@ -312,9 +312,12 @@ fn handle_mv(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubComma
 
     for (old_path, node) in subtree {
         // Remap the path: strip src prefix and join to dst.
-        let suffix = old_path
-            .strip_prefix(&src)
-            .expect("clone_subtree always returns src-prefixed paths");
+        // clone_subtree guarantees all returned paths are src-prefixed, so
+        // strip_prefix will succeed. If the invariant is somehow violated,
+        // skip the entry rather than panicking so the simulation stays alive.
+        let Ok(suffix) = old_path.strip_prefix(&src) else {
+            continue;
+        };
         let new_path = dst.join(suffix);
 
         // Ensure ancestor directories exist for deeply nested paths.
@@ -404,9 +407,11 @@ fn handle_cp(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubComma
         let subtree = state.fs.clone_subtree(&src);
 
         for (old_path, node) in subtree {
-            let suffix = old_path
-                .strip_prefix(&src)
-                .expect("clone_subtree always returns src-prefixed paths");
+            // clone_subtree guarantees all returned paths are src-prefixed; skip
+            // any entry that violates the invariant rather than panicking.
+            let Ok(suffix) = old_path.strip_prefix(&src) else {
+                continue;
+            };
             let new_path = dst.join(suffix);
 
             ensure_ancestors(&mut state.fs, &new_path, prov_src.clone());
@@ -431,12 +436,11 @@ fn handle_cp(state: &mut PreviewState, argv: &[&str], sub_cmd: &str) -> SubComma
             files_changed.push(new_path);
         }
     } else {
-        // Single file copy.
-        let node = state
-            .fs
-            .get(&src)
-            .expect("contains guard ensures src exists")
-            .clone();
+        // Single file copy. The `contains` guard above ensures src exists, but
+        // use `if let` instead of `expect` to stay clippy-clean.
+        let Some(node) = state.fs.get(&src).cloned() else {
+            return SubCommandResult::empty();
+        };
 
         ensure_ancestors(&mut state.fs, &dst, prov_src.clone());
 
@@ -479,11 +483,91 @@ fn split_commands(raw: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Handle a package install sub-command for any supported package manager.
+///
+/// `manager` is the canonical registry key (e.g. "apt", "pip", "npm", "apk").
+/// `argv` is everything after the binary name (e.g. for `apt-get install -y curl`,
+/// argv would be `["install", "-y", "curl"]`).
+/// `install_keywords` lists the sub-command tokens that trigger an install
+/// (e.g. `&["install"]` for apt/pip/npm, `&["add"]` for apk).
+///
+/// Logic:
+/// 1. Scan `argv` for the first token matching an install keyword. If none found,
+///    the command is unmodeled (e.g. `apt-get update`).
+/// 2. Collect tokens after the keyword, stripping any that start with `-`.
+/// 3. If no packages remain after stripping, the command is unmodeled.
+/// 4. Record each package in the registry and emit a `SimulatedInstall` warning.
+fn handle_package_install(
+    state: &mut PreviewState,
+    manager: &str,
+    argv: &[&str],
+    sub_cmd: &str,
+    install_keywords: &[&str],
+) -> SubCommandResult {
+    // Find the index of the first install keyword in argv.
+    let keyword_pos = argv
+        .iter()
+        .position(|token| install_keywords.contains(token));
+
+    let keyword_idx = match keyword_pos {
+        Some(idx) => idx,
+        None => {
+            // No install keyword found — this is an unmodeled sub-command (e.g. apt-get update).
+            state.warnings.push(Warning::UnmodeledRunCommand {
+                command: sub_cmd.to_string(),
+            });
+            return SubCommandResult::empty();
+        }
+    };
+
+    // Collect tokens after the keyword, filtering out flag tokens (those starting with '-').
+    let packages: Vec<String> = argv[keyword_idx + 1..]
+        .iter()
+        .filter(|token| !token.starts_with('-'))
+        .map(|token| token.to_string())
+        .collect();
+
+    if packages.is_empty() {
+        // No package names after stripping flags — unmodeled (e.g. `apt-get install -y`).
+        state.warnings.push(Warning::UnmodeledRunCommand {
+            command: sub_cmd.to_string(),
+        });
+        return SubCommandResult::empty();
+    }
+
+    // Record each package in the installed registry under the canonical manager key.
+    // `record()` returns false for unrecognised manager names — emit an UnmodeledRunCommand
+    // so the user knows nothing was stored, rather than silently dropping the install.
+    for pkg in &packages {
+        if !state.installed.record(manager, pkg.clone()) {
+            state.warnings.push(Warning::UnmodeledRunCommand {
+                command: sub_cmd.to_string(),
+            });
+            return SubCommandResult::empty();
+        }
+    }
+
+    // Sort packages alphabetically so the warning matches the order that
+    // `InstalledRegistry::list()` will return them, giving a consistent user view.
+    let mut sorted_packages = packages;
+    sorted_packages.sort();
+
+    // Emit a SimulatedInstall warning so the user knows the install was approximated.
+    state.warnings.push(Warning::SimulatedInstall {
+        manager: manager.to_string(),
+        packages: sorted_packages,
+    });
+
+    SubCommandResult::empty()
+}
+
 /// Dispatch a single sub-command against the current simulation state.
 ///
 /// Modeled commands (mkdir, touch, rm, mv, cp) are handled directly and
-/// mutate the virtual filesystem. All other commands fall through to the
-/// `UnmodeledRunCommand` warning path so the user can see what was skipped.
+/// mutate the virtual filesystem. Package manager commands (apt-get, apt, pip,
+/// pip3, npm, apk) record into the installed registry and emit SimulatedInstall
+/// warnings. All other commands fall through to the `UnmodeledRunCommand` warning
+/// path so the user can see what was skipped.
 fn dispatch_sub_command(state: &mut PreviewState, sub_cmd: &str) -> SubCommandResult {
     let argv = parse_argv(sub_cmd);
     match argv.first().copied().unwrap_or("") {
@@ -492,6 +576,16 @@ fn dispatch_sub_command(state: &mut PreviewState, sub_cmd: &str) -> SubCommandRe
         "rm" => handle_rm(state, &argv[1..], sub_cmd),
         "mv" => handle_mv(state, &argv[1..], sub_cmd),
         "cp" => handle_cp(state, &argv[1..], sub_cmd),
+        // apt and apt-get share the "apt" registry key.
+        "apt-get" | "apt" => {
+            handle_package_install(state, "apt", &argv[1..], sub_cmd, &["install"])
+        }
+        // pip and pip3 share the "pip" registry key.
+        "pip" | "pip3" => handle_package_install(state, "pip", &argv[1..], sub_cmd, &["install"]),
+        // npm supports both "install" and its short alias "i".
+        "npm" => handle_package_install(state, "npm", &argv[1..], sub_cmd, &["install", "i"]),
+        // apk uses "add" as its install keyword.
+        "apk" => handle_package_install(state, "apk", &argv[1..], sub_cmd, &["add"]),
         _ => {
             // Record the sub-command as unmodeled so the user sees it in warnings.
             state.warnings.push(Warning::UnmodeledRunCommand {
@@ -574,7 +668,9 @@ mod tests {
     }
 
     #[test]
-    fn run_does_not_mutate_fs_or_env() {
+    fn package_install_does_not_mutate_fs_or_env() {
+        // Package install commands record into InstalledRegistry but must never
+        // write to the virtual filesystem or env map.
         let mut state = PreviewState::default();
         let fs_before = state.fs.iter().count();
         let env_before = state.env.len();
@@ -584,12 +680,12 @@ mod tests {
         assert_eq!(
             state.fs.iter().count(),
             fs_before,
-            "fs must not change after RUN stub"
+            "fs must not change after package install"
         );
         assert_eq!(
             state.env.len(),
             env_before,
-            "env must not change after RUN stub"
+            "env must not change after package install"
         );
     }
 
@@ -665,6 +761,8 @@ mod tests {
 
     #[test]
     fn run_and_chain_emits_per_subcommand_warnings() {
+        // After #21: apt-get update → UnmodeledRunCommand; apt-get install → SimulatedInstall.
+        // Two warnings total: one per sub-command.
         let mut state = PreviewState::default();
         handle_run(&mut state, "apt-get update && apt-get install -y curl", 1);
 
@@ -675,23 +773,23 @@ mod tests {
             state.warnings.len()
         );
 
-        // First warning must reference the first sub-command.
+        // First warning: apt-get update is unmodeled (no install keyword).
         assert!(
             matches!(
                 &state.warnings[0],
                 Warning::UnmodeledRunCommand { command } if command == "apt-get update"
             ),
-            "first warning should be for 'apt-get update', got: {:?}",
+            "first warning should be UnmodeledRunCommand for 'apt-get update', got: {:?}",
             state.warnings[0]
         );
 
-        // Second warning must reference the second sub-command.
+        // Second warning: apt-get install emits SimulatedInstall (not UnmodeledRunCommand).
         assert!(
             matches!(
                 &state.warnings[1],
-                Warning::UnmodeledRunCommand { command } if command == "apt-get install -y curl"
+                Warning::SimulatedInstall { manager, .. } if manager == "apt"
             ),
-            "second warning should be for 'apt-get install -y curl', got: {:?}",
+            "second warning should be SimulatedInstall for apt-get install, got: {:?}",
             state.warnings[1]
         );
     }
@@ -1300,5 +1398,310 @@ mod tests {
             "touch must populate files_changed in the LayerSummary"
         );
         assert!(layer.files_changed.contains(&PathBuf::from("/newfile.txt")));
+    }
+
+    // ── Package install handler tests (#21) ───────────────────────────────
+
+    #[test]
+    fn apt_get_install_records_packages() {
+        // apt-get install -y curl wget git → installed.list("apt") == ["curl", "git", "wget"]
+        // BTreeSet sorts alphabetically.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get install -y curl wget git", 1);
+        assert_eq!(
+            state.installed.list("apt"),
+            vec!["curl", "git", "wget"],
+            "apt-get install must record all three packages in sorted order"
+        );
+    }
+
+    #[test]
+    fn apt_get_install_emits_simulated_install_warning() {
+        // SimulatedInstall must list all three packages (sorted alphabetically).
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get install -y curl wget git", 1);
+        let simulated = state.warnings.iter().find(|w| {
+            matches!(
+                w,
+                Warning::SimulatedInstall { manager, .. } if manager == "apt"
+            )
+        });
+        assert!(
+            simulated.is_some(),
+            "expected a SimulatedInstall warning with manager 'apt'"
+        );
+        if let Some(Warning::SimulatedInstall { packages, .. }) = simulated {
+            assert_eq!(
+                packages,
+                &vec!["curl".to_string(), "git".to_string(), "wget".to_string()],
+                "SimulatedInstall packages must be sorted and contain all three packages"
+            );
+        }
+    }
+
+    #[test]
+    fn apt_get_install_no_unmodeled_warning() {
+        // apt-get install must NOT emit an UnmodeledRunCommand warning.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get install -y curl wget git", 1);
+        let has_unmodeled = state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. }));
+        assert!(
+            !has_unmodeled,
+            "apt-get install must not emit UnmodeledRunCommand"
+        );
+    }
+
+    #[test]
+    fn apt_get_update_emits_unmodeled_run_command() {
+        // "apt-get update" has no install keyword → must fall through to UnmodeledRunCommand.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get update", 1);
+        let has_unmodeled = state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. }));
+        assert!(
+            has_unmodeled,
+            "apt-get update must emit UnmodeledRunCommand (no install keyword)"
+        );
+    }
+
+    #[test]
+    fn apt_install_alias_records_packages() {
+        // "apt" (without "-get") must also dispatch to handle_package_install.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt install -y vim", 1);
+        assert!(
+            state.installed.list("apt").contains(&"vim".to_string()),
+            "apt install must record 'vim' under the 'apt' manager"
+        );
+    }
+
+    #[test]
+    fn pip_install_records_packages() {
+        // pip install requests flask → installed.list("pip") == ["flask", "requests"]
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "pip install requests flask", 1);
+        assert_eq!(
+            state.installed.list("pip"),
+            vec!["flask", "requests"],
+            "pip install must record packages in sorted order"
+        );
+    }
+
+    #[test]
+    fn pip_install_strips_flags() {
+        // Tokens starting with '-' must be excluded from the package list.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "pip install --no-cache-dir numpy", 1);
+        assert_eq!(
+            state.installed.list("pip"),
+            vec!["numpy"],
+            "pip install must record only 'numpy', not the flag"
+        );
+    }
+
+    #[test]
+    fn pip3_alias_records_packages() {
+        // pip3 must use the same "pip" manager key as pip.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "pip3 install django", 1);
+        assert!(
+            state.installed.list("pip").contains(&"django".to_string()),
+            "pip3 install must record 'django' under the 'pip' manager"
+        );
+    }
+
+    #[test]
+    fn pip_install_emits_simulated_install_warning() {
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "pip install requests", 1);
+        let simulated = state.warnings.iter().find(|w| {
+            matches!(
+                w,
+                Warning::SimulatedInstall { manager, .. } if manager == "pip"
+            )
+        });
+        assert!(
+            simulated.is_some(),
+            "pip install must emit SimulatedInstall warning with manager 'pip'"
+        );
+        if let Some(Warning::SimulatedInstall { packages, .. }) = simulated {
+            assert_eq!(
+                packages,
+                &vec!["requests".to_string()],
+                "SimulatedInstall packages must contain 'requests'"
+            );
+        }
+    }
+
+    #[test]
+    fn npm_install_records_packages() {
+        // npm install -g typescript → installed.list("npm") contains "typescript"
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "npm install -g typescript", 1);
+        assert!(
+            state
+                .installed
+                .list("npm")
+                .contains(&"typescript".to_string()),
+            "npm install must record 'typescript' under the 'npm' manager"
+        );
+    }
+
+    #[test]
+    fn npm_i_alias_records_packages() {
+        // "npm i" (short alias for install) must be recognized.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "npm i express", 1);
+        assert!(
+            state.installed.list("npm").contains(&"express".to_string()),
+            "npm i must record 'express' under the 'npm' manager"
+        );
+    }
+
+    #[test]
+    fn npm_install_emits_simulated_install_warning() {
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "npm install lodash", 1);
+        let simulated = state.warnings.iter().find(|w| {
+            matches!(
+                w,
+                Warning::SimulatedInstall { manager, .. } if manager == "npm"
+            )
+        });
+        assert!(
+            simulated.is_some(),
+            "npm install must emit SimulatedInstall warning with manager 'npm'"
+        );
+        if let Some(Warning::SimulatedInstall { packages, .. }) = simulated {
+            assert_eq!(
+                packages,
+                &vec!["lodash".to_string()],
+                "SimulatedInstall packages must contain 'lodash'"
+            );
+        }
+    }
+
+    #[test]
+    fn apk_add_records_packages() {
+        // apk add --no-cache bash curl → installed.list("apk") == ["bash", "curl"]
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apk add --no-cache bash curl", 1);
+        assert_eq!(
+            state.installed.list("apk"),
+            vec!["bash", "curl"],
+            "apk add must record packages in sorted order"
+        );
+    }
+
+    #[test]
+    fn apk_add_emits_simulated_install_warning() {
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apk add git", 1);
+        let simulated = state.warnings.iter().find(|w| {
+            matches!(
+                w,
+                Warning::SimulatedInstall { manager, .. } if manager == "apk"
+            )
+        });
+        assert!(
+            simulated.is_some(),
+            "apk add must emit SimulatedInstall warning with manager 'apk'"
+        );
+        if let Some(Warning::SimulatedInstall { packages, .. }) = simulated {
+            assert_eq!(
+                packages,
+                &vec!["git".to_string()],
+                "SimulatedInstall packages must contain 'git'"
+            );
+        }
+    }
+
+    #[test]
+    fn install_command_returns_no_filesystem_changes() {
+        // Package installs must not produce any files_changed in the LayerSummary.
+        let mut state = PreviewState::default();
+        let layer = handle_run(&mut state, "apt-get install -y curl", 1);
+        assert!(
+            layer.files_changed.is_empty(),
+            "apt-get install must not produce filesystem changes"
+        );
+    }
+
+    #[test]
+    fn apt_get_update_then_install_chain_records_packages() {
+        // Full realistic chain: update then install.
+        // update emits UnmodeledRunCommand; install records packages.
+        let mut state = PreviewState::default();
+        handle_run(
+            &mut state,
+            "apt-get update && apt-get install -y curl wget git",
+            1,
+        );
+        assert_eq!(
+            state.installed.list("apt"),
+            vec!["curl", "git", "wget"],
+            "install after update must record all packages in sorted order"
+        );
+    }
+
+    #[test]
+    fn install_and_mkdir_chain_both_take_effect() {
+        // Mixed chain: package install + filesystem command.
+        // Both effects must be visible after a single handle_run call.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get install -y curl && mkdir -p /app", 1);
+        assert!(
+            state.installed.list("apt").contains(&"curl".to_string()),
+            "curl must be recorded in the apt registry"
+        );
+        assert!(
+            state.fs.contains(std::path::Path::new("/app")),
+            "/app must be created by mkdir in the same chain"
+        );
+    }
+
+    #[test]
+    fn apt_get_install_flags_only_emits_unmodeled_run_command() {
+        // "apt-get install -y" has the install keyword but no package names after
+        // flag-stripping → falls through to UnmodeledRunCommand and records nothing.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get install -y", 1);
+        assert!(
+            state.installed.list("apt").is_empty(),
+            "no packages must be recorded when only flags are present"
+        );
+        let has_unmodeled = state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::UnmodeledRunCommand { .. }));
+        assert!(
+            has_unmodeled,
+            "apt-get install with flags only must emit UnmodeledRunCommand"
+        );
+        let has_simulated = state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::SimulatedInstall { .. }));
+        assert!(
+            !has_simulated,
+            "apt-get install with flags only must not emit SimulatedInstall"
+        );
+    }
+
+    #[test]
+    fn semicolon_chain_install_records_packages() {
+        // `;`-separated chains must work the same as `&&`-separated chains.
+        let mut state = PreviewState::default();
+        handle_run(&mut state, "apt-get update ; apt-get install -y curl", 1);
+        assert_eq!(
+            state.installed.list("apt"),
+            vec!["curl"],
+            "install after semicolon-separated update must record packages"
+        );
     }
 }
