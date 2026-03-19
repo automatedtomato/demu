@@ -6,12 +6,14 @@ Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 ## In progress
 
 ## Up next
-- [ ] [#23](https://github.com/automatedtomato/demu/issues/23) feat: REPL `apt list --installed` / `pip list`
 - [ ] [#24](https://github.com/automatedtomato/demu/issues/24) feat: REPL `:reload`
 - [ ] [#25](https://github.com/automatedtomato/demu/issues/25) feat: RUN skipped-command warnings
+- [ ] [#32](https://github.com/automatedtomato/demu/issues/32) refactor: extract `io_err` closure to shared helper
+- [ ] [#33](https://github.com/automatedtomato/demu/issues/33) fix: sanitize env var keys/values in `env_cmd.rs`
 
 ## Done
 
+- [x] [#23](https://github.com/automatedtomato/demu/issues/23) feat: REPL `apt list --installed` / `pip list` — merged [#34](https://github.com/automatedtomato/demu/pull/34)
 - [x] [#22](https://github.com/automatedtomato/demu/issues/22) feat: REPL `:installed` + `which` — merged [#31](https://github.com/automatedtomato/demu/pull/31)
 - [x] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry — merged [#30](https://github.com/automatedtomato/demu/pull/30)
 - [x] [#20](https://github.com/automatedtomato/demu/issues/20) feat: RUN filesystem mutation simulation — merged [#29](https://github.com/automatedtomato/demu/pull/29)
