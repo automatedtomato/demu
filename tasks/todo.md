@@ -4,7 +4,6 @@ Milestone: [Release v0.2.0](https://github.com/automatedtomato/demu/milestone/2)
 Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 
 ## In progress
-- [x] [#22](https://github.com/automatedtomato/demu/issues/22) feat: REPL `:installed` + `which`
 
 ## Up next
 - [ ] [#23](https://github.com/automatedtomato/demu/issues/23) feat: REPL `apt list --installed` / `pip list`
@@ -13,6 +12,7 @@ Tracking issue: [#18](https://github.com/automatedtomato/demu/issues/18)
 
 ## Done
 
+- [x] [#22](https://github.com/automatedtomato/demu/issues/22) feat: REPL `:installed` + `which` — merged [#31](https://github.com/automatedtomato/demu/pull/31)
 - [x] [#21](https://github.com/automatedtomato/demu/issues/21) feat: RUN package install registry — merged [#30](https://github.com/automatedtomato/demu/pull/30)
 - [x] [#20](https://github.com/automatedtomato/demu/issues/20) feat: RUN filesystem mutation simulation — merged [#29](https://github.com/automatedtomato/demu/pull/29)
 - [x] [#19](https://github.com/automatedtomato/demu/issues/19) feat: RUN `&&`-chain parsing — merged [#28](https://github.com/automatedtomato/demu/pull/28)
