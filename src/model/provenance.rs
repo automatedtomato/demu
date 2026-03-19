@@ -18,7 +18,9 @@ pub enum ProvenanceSource {
     /// Node was copied from the host build context via COPY.
     CopyFromHost { host_path: PathBuf },
 
-    /// Node was copied from a named build stage (reserved for v0.3 multi-stage support).
+    /// Node was copied from a named build stage via `COPY --from=<stage>`.
+    ///
+    /// `stage` is the alias or numeric index string that identified the source stage.
     CopyFromStage { stage: String },
 
     /// Node was created or modified by a simulated RUN command.

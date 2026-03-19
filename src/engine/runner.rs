@@ -107,7 +107,8 @@ pub fn run(
 
             Instruction::Copy { source, dest } => {
                 let raw = format!("COPY {:?} {}", source, dest.display());
-                let layer = copy::handle_copy(&mut state, source, dest, context_dir, line)?;
+                let layer =
+                    copy::handle_copy(&mut state, source, dest, context_dir, line, &registry)?;
                 let effect = format!("{} file(s) copied", layer.files_changed.len());
                 (raw, effect, layer)
             }

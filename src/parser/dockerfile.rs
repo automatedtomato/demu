@@ -46,9 +46,13 @@ pub fn parse_dockerfile(input: &str) -> Result<Vec<Instruction>, ParseError> {
             "from" => parse_from(rest, line_num)?,
             "workdir" => parse_workdir(rest, line_num)?,
             "copy" => {
-                // COPY with a flag (e.g. --from=builder) is unsupported in v0.1.
-                // Downgrade to Unknown so the line is preserved in history.
-                if rest.trim_start().starts_with("--") {
+                let rest_trimmed = rest.trim_start();
+                if let Some(after_from) = rest_trimmed.strip_prefix("--from=") {
+                    // `COPY --from=<stage> <src> <dst>` — stage-to-stage copy.
+                    parse_copy_from_stage(after_from, trimmed, line_num)?
+                } else if rest_trimmed.starts_with("--") {
+                    // Any other flag (e.g. --chown=) is not supported — downgrade
+                    // to Unknown so the line is preserved in history/warnings.
                     Instruction::Unknown {
                         raw: trimmed.to_string(),
                     }
@@ -159,6 +163,60 @@ fn parse_workdir(rest: &str, line: usize) -> Result<Instruction, ParseError> {
 
     Ok(Instruction::Workdir {
         path: PathBuf::from(path),
+    })
+}
+
+/// Parse a `COPY --from=<stage> <src> <dst>` instruction.
+///
+/// `after_from` is the portion of the line that comes after `--from=`.
+/// `raw_line`   is the original untrimmed instruction line (for Unknown fallback).
+///
+/// # Rules
+/// - If the stage name (the token before the first space) is empty, returns
+///   `ParseError::InvalidInstruction`.
+/// - Requires exactly two path tokens after the stage name (`<src>` and `<dst>`).
+///   Fewer tokens is a `ParseError::InvalidInstruction`.
+fn parse_copy_from_stage(
+    after_from: &str,
+    raw_line: &str,
+    line: usize,
+) -> Result<Instruction, ParseError> {
+    // Split `after_from` into tokens. The first token is `<stage>[/<src_start>…]`
+    // if written without spaces, but Docker syntax is always:
+    //   --from=<stage> <src> <dst>
+    // so the stage name is the bare string before the next whitespace.
+    let mut tokens = after_from.split_whitespace();
+
+    let stage_name = tokens.next().unwrap_or("");
+    if stage_name.is_empty() {
+        return Err(ParseError::InvalidInstruction {
+            line,
+            message: format!("COPY --from= requires a non-empty stage name in: {raw_line}"),
+        });
+    }
+
+    // After the stage name, we need exactly <src> and <dst>.
+    let remaining: Vec<&str> = tokens.collect();
+    if remaining.len() != 2 {
+        return Err(ParseError::InvalidInstruction {
+            line,
+            message: format!(
+                "COPY --from={stage_name} requires exactly <src> and <dst> arguments, \
+                 got {} token(s) in: {raw_line}",
+                remaining.len()
+            ),
+        });
+    }
+
+    let src_path = PathBuf::from(remaining[0]);
+    let dest = PathBuf::from(remaining[1]);
+
+    Ok(Instruction::Copy {
+        source: CopySource::Stage {
+            name: stage_name.to_string(),
+            src_path,
+        },
+        dest,
     })
 }
 
@@ -517,5 +575,75 @@ mod tests {
         let instructions = parse_dockerfile("EXPOSE 8080").expect("EXPOSE must not error");
         assert_eq!(instructions.len(), 1);
         assert!(matches!(instructions[0], Instruction::Unknown { .. }));
+    }
+
+    // --- COPY --from=<stage> parsing ---
+
+    #[test]
+    fn parse_copy_from_with_alias() {
+        // `COPY --from=builder /out/app /app/binary` must produce a Stage copy.
+        let instructions =
+            parse_dockerfile("COPY --from=builder /out/app /app/binary").expect("must not error");
+        assert_eq!(instructions.len(), 1);
+        assert_eq!(
+            instructions[0],
+            Instruction::Copy {
+                source: CopySource::Stage {
+                    name: "builder".to_string(),
+                    src_path: PathBuf::from("/out/app"),
+                },
+                dest: PathBuf::from("/app/binary"),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_copy_from_with_numeric_index() {
+        // `COPY --from=0 /out/app /app/binary` — numeric index treated as a string key.
+        let instructions =
+            parse_dockerfile("COPY --from=0 /out/app /app/binary").expect("must not error");
+        assert_eq!(instructions.len(), 1);
+        assert_eq!(
+            instructions[0],
+            Instruction::Copy {
+                source: CopySource::Stage {
+                    name: "0".to_string(),
+                    src_path: PathBuf::from("/out/app"),
+                },
+                dest: PathBuf::from("/app/binary"),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_copy_from_empty_stage_name_returns_error() {
+        // `COPY --from= /out /app` — empty stage name must be an error.
+        let result = parse_dockerfile("COPY --from= /out /app");
+        assert!(
+            result.is_err(),
+            "empty stage name in --from= must be a parse error"
+        );
+    }
+
+    #[test]
+    fn parse_copy_from_missing_dest_returns_error() {
+        // `COPY --from=builder /out` — only one path token after the flag, needs 2.
+        let result = parse_dockerfile("COPY --from=builder /out");
+        assert!(
+            result.is_err(),
+            "COPY --from=builder with only one path token must be a parse error"
+        );
+    }
+
+    #[test]
+    fn parse_copy_unknown_flag_still_becomes_unknown() {
+        // `COPY --chown=1000 file.txt /app/` — unsupported flag → Unknown.
+        let instructions =
+            parse_dockerfile("COPY --chown=1000 file.txt /app/").expect("must not error");
+        assert_eq!(instructions.len(), 1);
+        assert!(
+            matches!(instructions[0], Instruction::Unknown { .. }),
+            "COPY with unsupported flag must become Unknown"
+        );
     }
 }

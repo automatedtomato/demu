@@ -5,8 +5,10 @@ Tracking issue: [#39](https://github.com/automatedtomato/demu/issues/39)
 
 ## In progress
 
+## Done (this session)
+- [x] [#42](https://github.com/automatedtomato/demu/issues/42) feat: `COPY --from=<stage>` — implemented all 10 steps, 608 tests pass
+
 ## Up next
-- [ ] [#42](https://github.com/automatedtomato/demu/issues/42) feat: `COPY --from=<stage>` _(depends on #41)_
 
 ## Done
 

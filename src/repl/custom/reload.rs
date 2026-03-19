@@ -440,8 +440,8 @@ mod tests {
         .expect("write v1");
 
         let df_path = file.path().to_path_buf();
-        let config = ReplConfig::new(df_path.clone())
-            .with_selected_stage(Some("builder".to_string()));
+        let config =
+            ReplConfig::new(df_path.clone()).with_selected_stage(Some("builder".to_string()));
         let mut state = PreviewState::default();
 
         // First reload succeeds with builder stage.
@@ -455,7 +455,10 @@ mod tests {
 
         // Second reload: "builder" not found — warning emitted, final stage used.
         let (r2, _out, err) = run_reload(&mut state, &config);
-        assert!(r2.is_ok(), "execute must return Ok on missing stage; got: {r2:?}");
+        assert!(
+            r2.is_ok(),
+            "execute must return Ok on missing stage; got: {r2:?}"
+        );
         assert!(
             err.contains("no longer exists after reload"),
             "stderr must warn about missing stage; got: {err}"
@@ -492,7 +495,10 @@ mod tests {
 
         let (result, out, _err) = run_reload(&mut state, &config);
         assert!(result.is_ok(), "execute must return Ok; got: {result:?}");
-        assert!(out.contains("Reloaded."), "stdout must contain 'Reloaded.'; got: {out}");
+        assert!(
+            out.contains("Reloaded."),
+            "stdout must contain 'Reloaded.'; got: {out}"
+        );
         assert_eq!(
             state.env.get("CTX_BUILD").map(String::as_str),
             Some("1"),
