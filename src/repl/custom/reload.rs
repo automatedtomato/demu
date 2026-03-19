@@ -466,4 +466,41 @@ mod tests {
             "state must fall back to the final stage (ONLY=1)"
         );
     }
+
+    // --- reload_with_context_and_stage_selection_restores_stage ---
+    //
+    // `ReplConfig::with_context` is used by tests that supply an explicit
+    // context directory (e.g. the engine-error test). Verify that chaining
+    // `.with_selected_stage` on a `with_context` config correctly re-applies
+    // the stage selection on reload, so the two constructors are equivalent
+    // from the reload perspective.
+
+    #[test]
+    fn reload_with_context_and_stage_selection_restores_stage() {
+        let ctx_dir = tempfile::TempDir::new().expect("tempdir");
+        let mut file = NamedTempFile::new().expect("tempfile");
+        write!(
+            file,
+            "FROM scratch AS builder\nENV CTX_BUILD=1\nFROM scratch\nENV CTX_FINAL=1\n"
+        )
+        .expect("write");
+
+        let config =
+            ReplConfig::with_context(file.path().to_path_buf(), ctx_dir.path().to_path_buf())
+                .with_selected_stage(Some("builder".to_string()));
+        let mut state = PreviewState::default();
+
+        let (result, out, _err) = run_reload(&mut state, &config);
+        assert!(result.is_ok(), "execute must return Ok; got: {result:?}");
+        assert!(out.contains("Reloaded."), "stdout must contain 'Reloaded.'; got: {out}");
+        assert_eq!(
+            state.env.get("CTX_BUILD").map(String::as_str),
+            Some("1"),
+            "state must be builder stage (CTX_BUILD=1)"
+        );
+        assert!(
+            !state.env.contains_key("CTX_FINAL"),
+            "state must NOT be final stage"
+        );
+    }
 }
