@@ -56,6 +56,11 @@ pub enum ParsedCommand {
     },
     /// `pip list` — list simulated pip packages.
     PipList,
+    /// `:explain <path>` — show provenance of a filesystem path.
+    Explain {
+        /// The path to explain. Empty string when no argument was given.
+        path: String,
+    },
     /// `:reload` — re-read and re-process the Dockerfile.
     Reload,
     /// The input was empty or only whitespace.
@@ -100,6 +105,7 @@ pub fn parse_input(line: &str) -> ParsedCommand {
         "pip" => parse_pip(args, trimmed),
         "which" => parse_which(args),
         // Colon-prefixed custom inspection commands.
+        ":explain" => parse_explain(args),
         ":layers" => ParsedCommand::Layers,
         ":history" => ParsedCommand::History,
         ":installed" => ParsedCommand::Installed,
@@ -224,6 +230,17 @@ fn parse_pip(args: &[&str], trimmed: &str) -> ParsedCommand {
             input: trimmed.to_string(),
         },
     }
+}
+
+/// Parse arguments for the `:explain` command.
+///
+/// Expects exactly one positional argument: the path to explain.
+/// When no argument is present, `path` is set to `String::new()` so the
+/// handler can return a specific `InvalidArguments` error rather than a
+/// generic parse error.
+fn parse_explain(args: &[&str]) -> ParsedCommand {
+    let path = args.first().map(|s| s.to_string()).unwrap_or_default();
+    ParsedCommand::Explain { path }
 }
 
 /// Parse arguments for the `which` command.
@@ -567,15 +584,45 @@ mod tests {
         );
     }
 
-    // --- Unimplemented colon commands are unknown ---
+    // --- :explain ---
 
     #[test]
-    fn explain_is_unknown() {
-        // :explain is not yet dispatched — must be unknown.
+    fn explain_with_path_returns_explain() {
         assert_eq!(
             parse_input(":explain /app/main.rs"),
+            ParsedCommand::Explain {
+                path: "/app/main.rs".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn explain_no_args_returns_explain_empty_path() {
+        assert_eq!(
+            parse_input(":explain"),
+            ParsedCommand::Explain {
+                path: String::new()
+            }
+        );
+    }
+
+    #[test]
+    fn explain_with_trailing_whitespace_returns_explain() {
+        assert_eq!(
+            parse_input(":explain /app/main.rs  "),
+            ParsedCommand::Explain {
+                path: "/app/main.rs".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn explain_uppercase_is_unknown() {
+        // Custom commands are case-sensitive — :EXPLAIN is not :explain.
+        assert_eq!(
+            parse_input(":EXPLAIN /app/main.rs"),
             ParsedCommand::Unknown {
-                input: ":explain /app/main.rs".to_string()
+                input: ":EXPLAIN /app/main.rs".to_string()
             }
         );
     }

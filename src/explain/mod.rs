@@ -1,8 +1,383 @@
-#![allow(dead_code)]
+// Answers provenance questions about files in the virtual filesystem.
+// Powers the `:explain` REPL command.
+//
+// The entry point is `explain_path`, which accepts a `PreviewState` and a
+// `Path` and returns a multi-line human-readable provenance report.
 
-//! Answers provenance questions about files, instructions, and mount sources.
+use std::fmt;
+use std::path::{Path, PathBuf};
 
-pub struct Explain;
+use crate::model::{
+    provenance::{MountInfo, MountKind, ProvenanceSource},
+    state::PreviewState,
+};
+
+/// Error type for the explain module.
+#[derive(Debug, PartialEq)]
+pub enum ExplainError {
+    /// The queried path does not exist in the virtual filesystem.
+    PathNotFound { path: PathBuf },
+}
+
+impl fmt::Display for ExplainError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExplainError::PathNotFound { path } => {
+                write!(f, "path not found: {}", path.display())
+            }
+        }
+    }
+}
+
+/// Format a human-readable provenance report for the node at `path`.
+///
+/// Resolves the path against the virtual filesystem and returns a
+/// multi-line string describing how the node was created, modified,
+/// and whether it is currently shadowed by a mount.
+///
+/// Returns `ExplainError::PathNotFound` when the path does not exist
+/// in the virtual filesystem.
+pub fn explain_path(state: &PreviewState, path: &Path) -> Result<String, ExplainError> {
+    // Look up the node in the virtual filesystem using the exact path provided.
+    let node = state
+        .fs
+        .get(path)
+        .ok_or_else(|| ExplainError::PathNotFound {
+            path: path.to_path_buf(),
+        })?;
+
+    let prov = node.provenance();
+
+    // Format the "Created by:" line using the creation source.
+    let created_line = format!("Created by:   {}", format_source(&prov.created_by));
+
+    // Format the "Modified by:" section.
+    // When empty, show "(none)". When multiple entries exist, subsequent lines
+    // are indented by 14 spaces to align under the first modification entry.
+    let modified_line = if prov.modified_by.is_empty() {
+        "Modified by:  (none)".to_string()
+    } else {
+        let mut parts: Vec<String> = prov
+            .modified_by
+            .iter()
+            .map(format_source)
+            .collect();
+
+        // First entry gets the label; subsequent entries are aligned to match.
+        let first = format!("Modified by:  {}", parts.remove(0));
+        let rest: Vec<String> = parts
+            .into_iter()
+            .map(|s| format!("              {s}"))
+            .collect();
+
+        if rest.is_empty() {
+            first
+        } else {
+            format!("{}\n{}", first, rest.join("\n"))
+        }
+    };
+
+    // Format the "Shadowed by:" line from the optional mount descriptor.
+    let shadowed_line = match &prov.shadowed_by_mount {
+        None => "Shadowed by:  (none)".to_string(),
+        Some(mount) => format!("Shadowed by:  {}", format_mount(mount)),
+    };
+
+    Ok(format!("{created_line}\n{modified_line}\n{shadowed_line}"))
+}
+
+/// Format a single `ProvenanceSource` as a human-readable string.
+///
+/// Each variant maps to a compact description that fits on one terminal line.
+fn format_source(source: &ProvenanceSource) -> String {
+    match source {
+        ProvenanceSource::FromImage { image } => format!("base image: {image}"),
+        ProvenanceSource::Workdir => "WORKDIR instruction".to_string(),
+        ProvenanceSource::CopyFromHost { host_path } => {
+            format!("COPY from host: {}", host_path.display())
+        }
+        ProvenanceSource::CopyFromStage { stage } => format!("COPY from stage '{stage}'"),
+        ProvenanceSource::RunCommand { command } => format!("RUN command: {command}"),
+        ProvenanceSource::EnvSet { key, value } => format!("ENV {key}={value}"),
+    }
+}
+
+/// Format a `MountInfo` as a human-readable string.
+///
+/// The output describes the kind of mount and the source path or name.
+fn format_mount(mount: &MountInfo) -> String {
+    match mount.mount_type {
+        MountKind::Bind => format!("bind mount from {}", mount.source),
+        MountKind::Volume => format!("volume mount: {}", mount.source),
+        MountKind::Tmpfs => "tmpfs mount".to_string(),
+        MountKind::Cache => format!("cache mount from {}", mount.source),
+        MountKind::Secret => format!("secret mount: {}", mount.source),
+    }
+}
 
 #[cfg(test)]
-mod tests {}
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::model::{
+        fs::{FileNode, FsNode},
+        provenance::{MountInfo, MountKind, Provenance, ProvenanceSource},
+        state::PreviewState,
+    };
+    use std::path::PathBuf;
+
+    // Helper: insert a file node with the given provenance into state at path.
+    fn state_with_node(path: &str, prov: Provenance) -> PreviewState {
+        let mut state = PreviewState::default();
+        let node = FsNode::File(FileNode {
+            content: vec![],
+            provenance: prov,
+            permissions: None,
+        });
+        state.fs.insert(PathBuf::from(path), node);
+        state
+    }
+
+    // --- explain_copy_from_host_shows_created_by ---
+
+    #[test]
+    fn explain_copy_from_host_shows_created_by() {
+        let prov = Provenance::new(ProvenanceSource::CopyFromHost {
+            host_path: PathBuf::from("src/main.rs"),
+        });
+        let state = state_with_node("/app/main.rs", prov);
+        let output = explain_path(&state, Path::new("/app/main.rs")).expect("should succeed");
+        assert!(
+            output.contains("COPY from host: src/main.rs"),
+            "got: {output}"
+        );
+    }
+
+    // --- explain_workdir_shows_workdir_instruction ---
+
+    #[test]
+    fn explain_workdir_shows_workdir_instruction() {
+        let prov = Provenance::new(ProvenanceSource::Workdir);
+        let state = state_with_node("/app", prov);
+        let output = explain_path(&state, Path::new("/app")).expect("should succeed");
+        assert!(output.contains("WORKDIR instruction"), "got: {output}");
+    }
+
+    // --- explain_run_command_shows_run_command ---
+
+    #[test]
+    fn explain_run_command_shows_run_command() {
+        let prov = Provenance::new(ProvenanceSource::RunCommand {
+            command: "touch /app/flag".to_string(),
+        });
+        let state = state_with_node("/app/flag", prov);
+        let output = explain_path(&state, Path::new("/app/flag")).expect("should succeed");
+        assert!(
+            output.contains("RUN command: touch /app/flag"),
+            "got: {output}"
+        );
+    }
+
+    // --- explain_from_image_shows_base_image ---
+
+    #[test]
+    fn explain_from_image_shows_base_image() {
+        let prov = Provenance::new(ProvenanceSource::FromImage {
+            image: "ubuntu:22.04".to_string(),
+        });
+        let state = state_with_node("/etc/os-release", prov);
+        let output = explain_path(&state, Path::new("/etc/os-release")).expect("should succeed");
+        assert!(output.contains("base image: ubuntu:22.04"), "got: {output}");
+    }
+
+    // --- explain_env_set_shows_env_assignment ---
+
+    #[test]
+    fn explain_env_set_shows_env_assignment() {
+        let prov = Provenance::new(ProvenanceSource::EnvSet {
+            key: "PATH".to_string(),
+            value: "/usr/local/bin:/usr/bin".to_string(),
+        });
+        let state = state_with_node("/env/PATH", prov);
+        let output = explain_path(&state, Path::new("/env/PATH")).expect("should succeed");
+        assert!(
+            output.contains("ENV PATH=/usr/local/bin:/usr/bin"),
+            "got: {output}"
+        );
+    }
+
+    // --- explain_copy_from_stage_shows_stage_name ---
+
+    #[test]
+    fn explain_copy_from_stage_shows_stage_name() {
+        let prov = Provenance::new(ProvenanceSource::CopyFromStage {
+            stage: "builder".to_string(),
+        });
+        let state = state_with_node("/app/binary", prov);
+        let output = explain_path(&state, Path::new("/app/binary")).expect("should succeed");
+        assert!(
+            output.contains("COPY from stage 'builder'"),
+            "got: {output}"
+        );
+    }
+
+    // --- explain_with_modifications_shows_all_entries ---
+
+    #[test]
+    fn explain_with_modifications_shows_all_entries() {
+        let mut prov = Provenance::new(ProvenanceSource::CopyFromHost {
+            host_path: PathBuf::from("app.py"),
+        });
+        prov.modified_by.push(ProvenanceSource::RunCommand {
+            command: "chmod 755 /app/app.py".to_string(),
+        });
+        let state = state_with_node("/app/app.py", prov);
+        let output = explain_path(&state, Path::new("/app/app.py")).expect("should succeed");
+        assert!(output.contains("COPY from host: app.py"), "got: {output}");
+        assert!(
+            output.contains("RUN command: chmod 755 /app/app.py"),
+            "got: {output}"
+        );
+    }
+
+    // --- explain_with_mount_shows_mount_info ---
+
+    #[test]
+    fn explain_with_mount_shows_mount_info() {
+        let mut prov = Provenance::new(ProvenanceSource::CopyFromHost {
+            host_path: PathBuf::from("src/main.rs"),
+        });
+        prov.shadowed_by_mount = Some(MountInfo {
+            source: "/host/path".to_string(),
+            mount_type: MountKind::Bind,
+        });
+        let state = state_with_node("/app/main.rs", prov);
+        let output = explain_path(&state, Path::new("/app/main.rs")).expect("should succeed");
+        assert!(
+            output.contains("bind mount from /host/path"),
+            "got: {output}"
+        );
+    }
+
+    // --- explain_path_not_found_returns_error ---
+
+    #[test]
+    fn explain_path_not_found_returns_error() {
+        let state = PreviewState::default();
+        let result = explain_path(&state, Path::new("/nonexistent/file.txt"));
+        assert_eq!(
+            result,
+            Err(ExplainError::PathNotFound {
+                path: PathBuf::from("/nonexistent/file.txt")
+            })
+        );
+    }
+
+    // --- explain_modified_by_none_shows_none ---
+
+    #[test]
+    fn explain_modified_by_none_shows_none() {
+        let prov = Provenance::new(ProvenanceSource::Workdir);
+        // modified_by is empty by default from Provenance::new
+        let state = state_with_node("/app", prov);
+        let output = explain_path(&state, Path::new("/app")).expect("should succeed");
+        assert!(output.contains("Modified by:  (none)"), "got: {output}");
+    }
+
+    // --- explain_shadowed_by_none_shows_none ---
+
+    #[test]
+    fn explain_shadowed_by_none_shows_none() {
+        let prov = Provenance::new(ProvenanceSource::Workdir);
+        // shadowed_by_mount is None by default
+        let state = state_with_node("/app", prov);
+        let output = explain_path(&state, Path::new("/app")).expect("should succeed");
+        assert!(output.contains("Shadowed by:  (none)"), "got: {output}");
+    }
+
+    // --- explain_multiple_modifications_aligned ---
+    //
+    // When there are 2+ modifications, subsequent lines must be indented by
+    // 14 spaces so they align under the first modification entry.
+
+    #[test]
+    fn explain_multiple_modifications_aligned() {
+        let mut prov = Provenance::new(ProvenanceSource::CopyFromHost {
+            host_path: PathBuf::from("app.py"),
+        });
+        prov.modified_by.push(ProvenanceSource::RunCommand {
+            command: "mv /app/app.py /app/main.py".to_string(),
+        });
+        prov.modified_by.push(ProvenanceSource::RunCommand {
+            command: "chmod 755 /app/main.py".to_string(),
+        });
+        let state = state_with_node("/app/main.py", prov);
+        let output = explain_path(&state, Path::new("/app/main.py")).expect("should succeed");
+
+        // Both modifications must appear.
+        assert!(
+            output.contains("RUN command: mv /app/app.py /app/main.py"),
+            "first modification missing; got: {output}"
+        );
+        assert!(
+            output.contains("RUN command: chmod 755 /app/main.py"),
+            "second modification missing; got: {output}"
+        );
+
+        // The second modification must be indented by 14 spaces.
+        // The label "Modified by:  " is 14 chars; subsequent lines align under the value.
+        assert!(
+            output.contains("              RUN command: chmod 755 /app/main.py"),
+            "second modification must be indented 14 spaces; got:\n{output}"
+        );
+    }
+
+    // --- mount kind format tests ---
+
+    #[test]
+    fn format_mount_volume_shows_volume_name() {
+        let mount = MountInfo {
+            source: "myvolume".to_string(),
+            mount_type: MountKind::Volume,
+        };
+        assert_eq!(format_mount(&mount), "volume mount: myvolume");
+    }
+
+    #[test]
+    fn format_mount_tmpfs_shows_tmpfs_label() {
+        let mount = MountInfo {
+            source: "ignored".to_string(),
+            mount_type: MountKind::Tmpfs,
+        };
+        assert_eq!(format_mount(&mount), "tmpfs mount");
+    }
+
+    #[test]
+    fn format_mount_cache_shows_source() {
+        let mount = MountInfo {
+            source: "/cache/go".to_string(),
+            mount_type: MountKind::Cache,
+        };
+        assert_eq!(format_mount(&mount), "cache mount from /cache/go");
+    }
+
+    #[test]
+    fn format_mount_secret_shows_name() {
+        let mount = MountInfo {
+            source: "mysecret".to_string(),
+            mount_type: MountKind::Secret,
+        };
+        assert_eq!(format_mount(&mount), "secret mount: mysecret");
+    }
+
+    // --- ExplainError::Display ---
+
+    #[test]
+    fn explain_error_display_contains_path() {
+        let err = ExplainError::PathNotFound {
+            path: PathBuf::from("/missing/file"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("/missing/file"), "got: {msg}");
+    }
+}

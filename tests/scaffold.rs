@@ -3,7 +3,7 @@
 /// structural breakage (missing derives, moved types, API changes)
 /// causes a runtime failure, not just a compile error.
 use demu::engine::EngineError;
-use demu::explain::Explain;
+use demu::explain::ExplainError;
 use demu::model::PreviewState;
 use demu::parser::ParseError;
 use demu::repl::Repl;
@@ -49,7 +49,10 @@ fn repl_repl_is_constructible() {
 
 #[test]
 fn explain_explain_is_constructible() {
-    let _x = Explain;
+    // Verify the explain module's public error type is accessible.
+    let _e = ExplainError::PathNotFound {
+        path: std::path::PathBuf::from("/test"),
+    };
 }
 
 #[test]
