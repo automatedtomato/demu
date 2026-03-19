@@ -61,6 +61,11 @@ This parses the Dockerfile, runs the simulation engine, prints any warnings, and
 |---------|-------------|
 | `:history` | Show each instruction and its effect, in order |
 | `:layers` | Show a Docker-style layer summary |
+| `:installed` | List all simulated package installs by manager |
+| `:reload` | Re-read and re-simulate the Dockerfile in place |
+| `which <cmd>` | Check whether a command appears to be installed |
+| `apt list --installed` | apt-style installed package listing |
+| `pip list` | pip-style installed package listing |
 
 ### Flags
 
@@ -104,15 +109,18 @@ It prefers **fast, safe previews** over perfect fidelity. Simulated behavior is 
 
 ## Status
 
-**v0.1.0** — Dockerfile preview shell complete.
+**v0.2.0** — Useful RUN simulation.
 
 | Feature | Status |
 |---------|--------|
 | `FROM`, `WORKDIR`, `COPY`, `ENV` | Fully simulated |
-| `RUN` | History recorded; execution stubbed |
+| `RUN` filesystem commands (`mkdir`, `touch`, `rm`, `mv`, `cp`) | Simulated |
+| `RUN` package installs (`apt-get`, `pip`, `npm`, `apk`) | Simulated |
 | `ls`, `cd`, `pwd`, `cat`, `find`, `env` | Working |
 | `:history`, `:layers` | Working |
-| `:installed`, `which`, `:reload` | Planned for v0.2 |
+| `:installed`, `which`, `:reload` | Working |
+| `apt list --installed`, `pip list` | Working |
+| Skipped-command warnings with reason | Working |
 | `:explain <path>` | Planned for v0.3 |
 | Compose support | Planned for v0.4 |
 
