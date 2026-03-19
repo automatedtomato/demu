@@ -34,12 +34,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8b1cd  # stable 2025-03-14
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d4  # v2.7.8
+        uses: Swatinem/rust-cache@v2
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8b1cd  # stable 2025-03-14
+        uses: dtolnay/rust-toolchain@stable
 
       # Fail immediately with a clear message if the registry token is not
       # configured, rather than letting cargo produce a generic auth error.
