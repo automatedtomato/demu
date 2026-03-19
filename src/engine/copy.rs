@@ -197,9 +197,21 @@ pub(crate) fn handle_copy(
         }
         // Stage-to-stage copy: look up the source stage in the registry,
         // then copy the specified path (file or directory) into this stage's fs.
+        //
+        // `context_dir` is intentionally not used here — all stage-to-stage
+        // operations are confined to the in-memory VirtualFs. No host filesystem
+        // calls are made from this branch.
         CopySource::Stage { name, src_path } => {
             // 1. Resolve the source stage. Relative src_paths are treated as
             //    absolute from the stage root (prepend "/" if not already absolute).
+            //
+            //    Note: `src_path` may contain ".." components (e.g. from a
+            //    Dockerfile that writes `COPY --from=builder /../../etc/passwd /dst`).
+            //    Rust's PathBuf preserves these without normalization, but they are
+            //    safe here because `resolved_src` is only ever used as a key into
+            //    `source_stage.fs` (an in-memory BTreeMap) — no host I/O is performed.
+            //    A traversal path that does not match any VirtualFs entry simply
+            //    falls through to the MissingCopySource warning branch.
             let resolved_src = if src_path.is_absolute() {
                 src_path.clone()
             } else {
