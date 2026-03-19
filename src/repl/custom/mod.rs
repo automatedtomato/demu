@@ -5,4 +5,5 @@
 // None of these handlers mutate `PreviewState` — they are pure read commands.
 
 pub mod history;
+pub mod installed;
 pub mod layers;

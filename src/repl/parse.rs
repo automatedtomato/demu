@@ -42,6 +42,13 @@ pub enum ParsedCommand {
     Layers,
     /// `:history` — display the instruction history timeline.
     History,
+    /// `:installed` — list all recorded packages grouped by manager.
+    Installed,
+    /// `which <cmd>` — show the simulated binary path for a command.
+    Which {
+        /// The command name to look up. Empty string when no argument was given.
+        cmd: String,
+    },
     /// The input was empty or only whitespace.
     Empty,
     /// The input did not match any known command.
@@ -79,9 +86,12 @@ pub fn parse_input(line: &str) -> ParsedCommand {
         "env" => ParsedCommand::Env,
         "exit" | "quit" => ParsedCommand::Exit,
         "help" => ParsedCommand::Help,
+        // Standard commands with arguments.
+        "which" => parse_which(args),
         // Colon-prefixed custom inspection commands.
         ":layers" => ParsedCommand::Layers,
         ":history" => ParsedCommand::History,
+        ":installed" => ParsedCommand::Installed,
         _ => ParsedCommand::Unknown {
             input: trimmed.to_string(),
         },
@@ -168,6 +178,17 @@ fn parse_find(args: &[&str]) -> ParsedCommand {
     }
 
     ParsedCommand::Find { path, name_pattern }
+}
+
+/// Parse arguments for the `which` command.
+///
+/// Expects exactly one positional argument: the command name to look up.
+/// When no argument is present, `cmd` is set to `String::new()` so the
+/// handler can return a specific `InvalidArguments` error rather than a
+/// generic parse error.
+fn parse_which(args: &[&str]) -> ParsedCommand {
+    let cmd = args.first().map(|s| s.to_string()).unwrap_or_default();
+    ParsedCommand::Which { cmd }
 }
 
 #[cfg(test)]
@@ -513,13 +534,56 @@ mod tests {
         );
     }
 
+    // --- :installed ---
+
     #[test]
-    fn installed_is_unknown() {
-        // :installed is not yet dispatched — must be unknown.
+    fn installed_bare_returns_installed() {
+        assert_eq!(parse_input(":installed"), ParsedCommand::Installed);
+    }
+
+    #[test]
+    fn installed_with_trailing_whitespace() {
+        assert_eq!(parse_input(":installed  "), ParsedCommand::Installed);
+    }
+
+    #[test]
+    fn installed_uppercase_is_unknown() {
+        // Custom commands are case-sensitive.
         assert_eq!(
-            parse_input(":installed"),
+            parse_input(":INSTALLED"),
             ParsedCommand::Unknown {
-                input: ":installed".to_string()
+                input: ":INSTALLED".to_string()
+            }
+        );
+    }
+
+    // --- which ---
+
+    #[test]
+    fn which_with_cmd_returns_which() {
+        assert_eq!(
+            parse_input("which curl"),
+            ParsedCommand::Which {
+                cmd: "curl".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn which_no_args_returns_which_empty_cmd() {
+        assert_eq!(
+            parse_input("which"),
+            ParsedCommand::Which { cmd: String::new() }
+        );
+    }
+
+    #[test]
+    fn which_uppercase_is_unknown() {
+        // Commands are case-sensitive — WHICH is not which.
+        assert_eq!(
+            parse_input("WHICH curl"),
+            ParsedCommand::Unknown {
+                input: "WHICH curl".to_string()
             }
         );
     }
