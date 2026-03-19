@@ -84,10 +84,22 @@ fn run_cli() -> Result<()> {
     // index). If omitted, use the final stage returned directly by the engine.
     let mut state = if let Some(ref stage_name) = cli.stage {
         output.stages.get(stage_name).cloned().ok_or_else(|| {
-            let available = output.stages.keys().join(", ");
+            // Sanitize both the user-supplied stage name and the Dockerfile-derived
+            // alias strings before embedding them in the error message. The main
+            // handler applies sanitize_for_terminal as a final backstop, but
+            // sanitizing at construction keeps the error value clean regardless of
+            // where it is later consumed or logged.
+            let safe_name = sanitize_for_terminal(stage_name);
+            let available = output
+                .stages
+                .keys()
+                .into_iter()
+                .map(|k| sanitize_for_terminal(&k))
+                .collect::<Vec<_>>()
+                .join(", ");
             anyhow::anyhow!(
                 "stage '{}' not found; available stages: {}",
-                stage_name,
+                safe_name,
                 available
             )
         })?
