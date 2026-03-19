@@ -17,7 +17,7 @@ use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
 use crate::parser::dockerfile::parse_dockerfile;
 use crate::repl::config::ReplConfig;
-use crate::repl::error::ReplError;
+use crate::repl::error::{io_err_mapper, ReplError};
 
 /// Execute the `:reload` command.
 ///
@@ -48,10 +48,7 @@ pub fn execute(
                 "demu: cannot read Dockerfile '{}': {e}",
                 safe_path
             )
-            .map_err(|e| ReplError::InvalidArguments {
-                command: ":reload".to_string(),
-                message: e.to_string(),
-            })?;
+            .map_err(io_err_mapper(":reload"))?;
             return Ok(());
         }
     };
@@ -61,12 +58,8 @@ pub fn execute(
         Ok(i) => i,
         Err(e) => {
             let safe_msg = sanitize_for_terminal(&e.to_string());
-            writeln!(err_writer, "demu: parse error: {safe_msg}").map_err(|e| {
-                ReplError::InvalidArguments {
-                    command: ":reload".to_string(),
-                    message: e.to_string(),
-                }
-            })?;
+            writeln!(err_writer, "demu: parse error: {safe_msg}")
+                .map_err(io_err_mapper(":reload"))?;
             return Ok(());
         }
     };
@@ -76,12 +69,8 @@ pub fn execute(
         Ok(s) => s,
         Err(e) => {
             let safe_msg = sanitize_for_terminal(&e.to_string());
-            writeln!(err_writer, "demu: engine error: {safe_msg}").map_err(|e| {
-                ReplError::InvalidArguments {
-                    command: ":reload".to_string(),
-                    message: e.to_string(),
-                }
-            })?;
+            writeln!(err_writer, "demu: engine error: {safe_msg}")
+                .map_err(io_err_mapper(":reload"))?;
             return Ok(());
         }
     };
@@ -94,10 +83,7 @@ pub fn execute(
             "warning: {}",
             sanitize_for_terminal(&w.to_string())
         )
-        .map_err(|e| ReplError::InvalidArguments {
-            command: ":reload".to_string(),
-            message: e.to_string(),
-        })?;
+        .map_err(io_err_mapper(":reload"))?;
     }
 
     // Step 4b: Count instructions processed (history entries) before replacing state.
@@ -107,12 +93,7 @@ pub fn execute(
     *state = new_state;
 
     // Step 4d: Confirm success to the user.
-    writeln!(writer, "Reloaded. {n} instructions processed.").map_err(|e| {
-        ReplError::InvalidArguments {
-            command: ":reload".to_string(),
-            message: e.to_string(),
-        }
-    })?;
+    writeln!(writer, "Reloaded. {n} instructions processed.").map_err(io_err_mapper(":reload"))?;
 
     Ok(())
 }
