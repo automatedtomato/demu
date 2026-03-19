@@ -18,19 +18,33 @@ When you are editing a `Dockerfile`, you often just want to answer questions lik
 
 ## Install
 
+### Pre-built binaries (recommended)
+
+Download the latest release for your platform from the [Releases page](https://github.com/automatedtomato/demu/releases).
+
+```bash
+# Linux / macOS — extract and move to PATH
+tar xzf demu-0.2.0-x86_64-unknown-linux-gnu.tar.gz
+sudo mv demu-0.2.0-x86_64-unknown-linux-gnu/demu /usr/local/bin/
+```
+
+Available targets:
+
+| Platform | File |
+|----------|------|
+| Linux x86_64 | `demu-*-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS Apple Silicon | `demu-*-aarch64-apple-darwin.tar.gz` |
+| macOS Intel | `demu-*-x86_64-apple-darwin.tar.gz` |
+| Windows x86_64 | `demu-*-x86_64-pc-windows-msvc.zip` |
+
+### From source
+
 Requires Rust stable (`rustup` recommended).
 
 ```bash
 git clone https://github.com/automatedtomato/demu.git
 cd demu
 cargo install --path .
-```
-
-Or build without installing:
-
-```bash
-cargo build --release
-# binary at: ./target/release/demu
 ```
 
 ## Usage
