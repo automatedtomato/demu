@@ -244,6 +244,9 @@ pub(crate) fn handle_copy(
                             permissions: None,
                         }),
                     );
+                    // Record in files_changed so the placeholder is visible in
+                    // layer summaries (consistent with host-copy missing-source path).
+                    files_changed.push(resolved_dest);
                 }
 
                 Some(FsNode::File(src_file)) => {
@@ -330,8 +333,12 @@ pub(crate) fn handle_copy(
                             }
                             FsNode::Symlink(_) => {
                                 // Symlinks are not yet modeled for stage copies.
-                                // Skip silently — provenance already records this
-                                // is a stage copy so the user can use :explain.
+                                // Emit MissingCopySource so the user sees a diagnostic
+                                // rather than a silent drop — consistent with the project
+                                // rule: do not silently fake behaviour.
+                                state.warnings.push(Warning::MissingCopySource {
+                                    path: abs_path.clone(),
+                                });
                             }
                         }
                     }
