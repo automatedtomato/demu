@@ -191,9 +191,7 @@ fn parse_copy_from_stage(
     if stage_name.is_empty() {
         return Err(ParseError::InvalidInstruction {
             line,
-            message: format!(
-                "COPY --from= requires a non-empty stage name in: {raw_line}"
-            ),
+            message: format!("COPY --from= requires a non-empty stage name in: {raw_line}"),
         });
     }
 

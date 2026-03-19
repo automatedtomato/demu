@@ -170,8 +170,7 @@ fn test_malformed_copy_returns_error() {
 fn test_copy_with_from_flag_parses_as_stage_copy() {
     // `COPY --from=builder /out/app /app/app` — now parsed as a stage copy (v0.3+).
     let input = include_str!("fixtures/parser/copy_with_from_flag.dockerfile");
-    let instructions =
-        parse_dockerfile(input).expect("COPY --from should parse without error");
+    let instructions = parse_dockerfile(input).expect("COPY --from should parse without error");
     assert_eq!(instructions.len(), 2);
     assert!(matches!(instructions[0], Instruction::From { .. }));
     // COPY --from=builder must now produce a typed Copy instruction.

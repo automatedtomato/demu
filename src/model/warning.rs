@@ -537,7 +537,10 @@ mod tests {
             s.contains("builder"),
             "display must contain stage name, got: {s}"
         );
-        assert!(s.contains('7'), "display must contain line number 7, got: {s}");
+        assert!(
+            s.contains('7'),
+            "display must contain line number 7, got: {s}"
+        );
     }
 
     #[test]
@@ -560,7 +563,10 @@ mod tests {
             line: 3,
         };
         let s = w.to_string();
-        assert!(s.contains("'0'"), "display must contain quoted stage '0', got: {s}");
+        assert!(
+            s.contains("'0'"),
+            "display must contain quoted stage '0', got: {s}"
+        );
     }
 
     #[test]
