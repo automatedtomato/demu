@@ -649,6 +649,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dispatch_explain_relative_path_resolves_against_cwd() {
+        // :explain main.rs with cwd=/app should find the node at /app/main.rs.
+        use crate::model::provenance::{Provenance, ProvenanceSource};
+        use std::path::PathBuf;
+
+        let prov = Provenance::new(ProvenanceSource::CopyFromHost {
+            host_path: PathBuf::from("src/main.rs"),
+        });
+        let node = FsNode::File(FileNode {
+            content: vec![],
+            provenance: prov,
+            permissions: None,
+        });
+        let mut state = PreviewState::default();
+        state.cwd = PathBuf::from("/app");
+        state.fs.insert(PathBuf::from("/app/main.rs"), node);
+
+        let (cont, out) = dispatch_str(&mut state, ":explain main.rs")
+            .expect(":explain with relative path should succeed");
+        assert!(cont);
+        assert!(
+            out.contains("COPY from host:"),
+            "provenance must appear for relative-path lookup; got: {out}"
+        );
+    }
+
     // --- :history dispatch ---
 
     #[test]

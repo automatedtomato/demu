@@ -11,7 +11,10 @@ use std::io::Write;
 use crate::explain;
 use crate::explain::ExplainError;
 use crate::model::state::PreviewState;
-use crate::repl::{error::ReplError, path::resolve_path};
+use crate::repl::{
+    error::{io_err_mapper, ReplError},
+    path::resolve_path,
+};
 
 /// Execute `:explain <path>`: resolve the path and display its provenance.
 ///
@@ -36,8 +39,5 @@ pub fn execute(state: &PreviewState, path: &str, writer: &mut impl Write) -> Res
 
     // Write the report followed by a newline so it is cleanly separated from
     // the next REPL prompt.
-    writeln!(writer, "{report}").map_err(|e| ReplError::InvalidArguments {
-        command: ":explain".to_string(),
-        message: e.to_string(),
-    })
+    writeln!(writer, "{report}").map_err(io_err_mapper(":explain"))
 }

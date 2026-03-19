@@ -234,12 +234,15 @@ fn parse_pip(args: &[&str], trimmed: &str) -> ParsedCommand {
 
 /// Parse arguments for the `:explain` command.
 ///
-/// Expects exactly one positional argument: the path to explain.
-/// When no argument is present, `path` is set to `String::new()` so the
-/// handler can return a specific `InvalidArguments` error rather than a
-/// generic parse error.
+/// Joins all tokens with a space to support paths that contain spaces,
+/// mirroring `parse_cat`. Returns an empty `path` string when no argument
+/// is given so the handler can return `InvalidArguments`.
 fn parse_explain(args: &[&str]) -> ParsedCommand {
-    let path = args.first().map(|s| s.to_string()).unwrap_or_default();
+    let path = if args.is_empty() {
+        String::new()
+    } else {
+        args.join(" ")
+    };
     ParsedCommand::Explain { path }
 }
 
@@ -612,6 +615,17 @@ mod tests {
             parse_input(":explain /app/main.rs  "),
             ParsedCommand::Explain {
                 path: "/app/main.rs".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn explain_multi_token_path_joins_with_space() {
+        // Paths with spaces (unusual but possible) should be joined rather than truncated.
+        assert_eq!(
+            parse_input(":explain /path with spaces"),
+            ParsedCommand::Explain {
+                path: "/path with spaces".to_string()
             }
         );
     }

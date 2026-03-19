@@ -30,6 +30,12 @@ impl fmt::Display for ExplainError {
     }
 }
 
+/// Column width of the section labels (e.g. `"Modified by:  "` is 14 chars).
+///
+/// Subsequent modification entries are indented by this many spaces so they
+/// align under the first entry on the line that starts with the label.
+const LABEL_WIDTH: usize = 14;
+
 /// Format a human-readable provenance report for the node at `path`.
 ///
 /// Resolves the path against the virtual filesystem and returns a
@@ -60,12 +66,11 @@ pub fn explain_path(state: &PreviewState, path: &Path) -> Result<String, Explain
     } else {
         let mut parts: Vec<String> = prov.modified_by.iter().map(format_source).collect();
 
-        // First entry gets the label; subsequent entries are aligned to match.
+        // First entry gets the label; subsequent entries are indented by
+        // LABEL_WIDTH spaces to align under the first value.
         let first = format!("Modified by:  {}", parts.remove(0));
-        let rest: Vec<String> = parts
-            .into_iter()
-            .map(|s| format!("              {s}"))
-            .collect();
+        let padding = " ".repeat(LABEL_WIDTH);
+        let rest: Vec<String> = parts.into_iter().map(|s| format!("{padding}{s}")).collect();
 
         if rest.is_empty() {
             first
