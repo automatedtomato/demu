@@ -122,7 +122,7 @@ fn run_cli() -> Result<()> {
 
     // Build the session-level config that the REPL needs for `:reload`.
     // The canonical path and context_dir are already computed above.
-    let repl_config = ReplConfig::new(canonical);
+    let repl_config = ReplConfig::new(canonical).with_selected_stage(cli.stage.clone());
 
     run_repl(&mut state, &repl_config)?;
 
