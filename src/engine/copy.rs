@@ -267,12 +267,9 @@ pub(crate) fn handle_copy(
                         stage: name.clone(),
                     };
                     // Determine the final destination (respects trailing slash).
-                    let final_dest = resolve_file_dest(
-                        &resolved_dest,
-                        &resolved_src,
-                        has_trailing_slash,
-                    )
-                    .unwrap_or(resolved_dest.clone());
+                    let final_dest =
+                        resolve_file_dest(&resolved_dest, &resolved_src, has_trailing_slash)
+                            .unwrap_or(resolved_dest.clone());
 
                     ensure_ancestors(&mut state.fs, &final_dest, provenance.clone());
                     // Clone the source node content and replace provenance to record
@@ -510,8 +507,15 @@ mod tests {
     ) -> LayerSummary {
         let source = CopySource::Host(PathBuf::from(src));
         let dest_path = PathBuf::from(dest);
-        handle_copy(state, &source, &dest_path, context, 1, &StageRegistry::default())
-            .expect("handle_copy ok")
+        handle_copy(
+            state,
+            &source,
+            &dest_path,
+            context,
+            1,
+            &StageRegistry::default(),
+        )
+        .expect("handle_copy ok")
     }
 
     // ── test: copy single file reads content ──────────────────────────────
@@ -715,10 +719,9 @@ mod tests {
         );
 
         // MissingCopyStage warning must be emitted with correct fields.
-        let warning = state
-            .warnings
-            .iter()
-            .find(|w| matches!(w, Warning::MissingCopyStage { stage, line: 5 } if stage == "builder"));
+        let warning = state.warnings.iter().find(
+            |w| matches!(w, Warning::MissingCopyStage { stage, line: 5 } if stage == "builder"),
+        );
         assert!(
             warning.is_some(),
             "expected MissingCopyStage {{ stage: 'builder', line: 5 }} warning"
@@ -820,7 +823,10 @@ mod tests {
 
         match node {
             FsNode::File(f) => {
-                assert_eq!(f.content, b"binary content", "content must match source stage file");
+                assert_eq!(
+                    f.content, b"binary content",
+                    "content must match source stage file"
+                );
                 // Provenance must be CopyFromStage.
                 match &f.provenance.created_by {
                     ProvenanceSource::CopyFromStage { stage } => {
@@ -850,8 +856,15 @@ mod tests {
             name: "nonexistent".to_string(),
             src_path: std::path::PathBuf::from("/app"),
         };
-        let layer = handle_copy(&mut state, &source, &PathBuf::from("/out"), ctx.path(), 3, &registry)
-            .expect("handle_copy ok");
+        let layer = handle_copy(
+            &mut state,
+            &source,
+            &PathBuf::from("/out"),
+            ctx.path(),
+            3,
+            &registry,
+        )
+        .expect("handle_copy ok");
 
         // files_changed must be empty — nothing was copied.
         assert!(
@@ -860,11 +873,13 @@ mod tests {
         );
 
         // MissingCopyStage warning must be present.
-        let has_warning = state
-            .warnings
-            .iter()
-            .any(|w| matches!(w, Warning::MissingCopyStage { stage, line: 3 } if stage == "nonexistent"));
-        assert!(has_warning, "expected MissingCopyStage warning for 'nonexistent' at line 3");
+        let has_warning = state.warnings.iter().any(
+            |w| matches!(w, Warning::MissingCopyStage { stage, line: 3 } if stage == "nonexistent"),
+        );
+        assert!(
+            has_warning,
+            "expected MissingCopyStage warning for 'nonexistent' at line 3"
+        );
     }
 
     #[test]
@@ -878,16 +893,25 @@ mod tests {
             name: "builder".to_string(),
             src_path: std::path::PathBuf::from("/out/missing"),
         };
-        let _layer =
-            handle_copy(&mut state, &source, &PathBuf::from("/app"), ctx.path(), 5, &registry)
-                .expect("handle_copy ok");
+        let _layer = handle_copy(
+            &mut state,
+            &source,
+            &PathBuf::from("/app"),
+            ctx.path(),
+            5,
+            &registry,
+        )
+        .expect("handle_copy ok");
 
         // MissingCopySource warning must be present.
         let has_warning = state
             .warnings
             .iter()
             .any(|w| matches!(w, Warning::MissingCopySource { path } if path.ends_with("missing")));
-        assert!(has_warning, "expected MissingCopySource warning for absent path in stage");
+        assert!(
+            has_warning,
+            "expected MissingCopySource warning for absent path in stage"
+        );
     }
 
     #[test]
@@ -935,8 +959,15 @@ mod tests {
             name: "0".to_string(),
             src_path: std::path::PathBuf::from("/out/app"),
         };
-        let layer = handle_copy(&mut state, &source, &PathBuf::from("/result"), ctx.path(), 1, &registry)
-            .expect("handle_copy ok");
+        let layer = handle_copy(
+            &mut state,
+            &source,
+            &PathBuf::from("/result"),
+            ctx.path(),
+            1,
+            &registry,
+        )
+        .expect("handle_copy ok");
 
         assert!(
             !layer.files_changed.is_empty(),
