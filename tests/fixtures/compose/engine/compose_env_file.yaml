@@ -1,0 +1,9 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.test
+    environment:
+      - SHARED=from_compose

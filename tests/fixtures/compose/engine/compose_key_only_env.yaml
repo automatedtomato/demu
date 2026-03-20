@@ -1,0 +1,8 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - HOST_VAR
+      - DEFINED_VAR=has_value
