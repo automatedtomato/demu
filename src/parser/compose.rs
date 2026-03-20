@@ -258,9 +258,13 @@ fn yaml_value_to_string(v: serde_yaml::Value) -> String {
         serde_yaml::Value::Number(n) => n.to_string(),
         serde_yaml::Value::Bool(b) => b.to_string(),
         serde_yaml::Value::Null => String::new(),
-        // Nested sequences/mappings are stringified as YAML — unusual but safe.
+        // Nested sequences/mappings are stringified as YAML — unusual but valid.
+        // `serde_yaml::to_string` is infallible in practice; the empty-string
+        // fallback is a last resort that should never be reached for well-formed
+        // serde_yaml Values. `.trim()` removes the trailing newline that
+        // serde_yaml always appends.
         other => serde_yaml::to_string(&other)
-            .unwrap_or_default()
+            .unwrap_or_else(|_| "<unserializable>".to_string())
             .trim()
             .to_string(),
     }
@@ -372,8 +376,11 @@ fn parse_volume_short(s: &str) -> VolumeSpec {
 }
 
 /// Classify a volume source string as a bind mount or a named volume.
+///
+/// Docker Compose treats sources starting with `.`, `/`, or `~` as host paths
+/// (bind mounts). Everything else is a named volume.
 fn classify_source(source: &str, target: &str, read_only: bool) -> VolumeSpec {
-    if source.starts_with('.') || source.starts_with('/') {
+    if source.starts_with('.') || source.starts_with('/') || source.starts_with('~') {
         VolumeSpec::Bind {
             host_path: PathBuf::from(source),
             container_path: PathBuf::from(target),
@@ -628,5 +635,104 @@ mod tests {
             "services:\n  svc:\n    image: nginx\n    restart: always\nnetworks:\n  default:\n";
         let result = parse_compose(yaml);
         assert!(result.is_ok(), "should tolerate unknown keys: {result:?}");
+    }
+
+    // ------------------------------------------------------------------
+    // Volume short-syntax: tilde home-directory prefix
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn parse_volume_short_tilde_is_bind() {
+        // `~` prefix must be classified as a Bind mount, not a Named volume.
+        let spec = parse_volume_short("~/projects/app:/app");
+        assert_eq!(
+            spec,
+            VolumeSpec::Bind {
+                host_path: PathBuf::from("~/projects/app"),
+                container_path: PathBuf::from("/app"),
+                read_only: false,
+            },
+            "tilde-prefixed source must be Bind, not Named"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Long-form volume syntax tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn volume_long_form_bind_happy_path() {
+        // Long-form bind with source present → Bind variant.
+        let yaml = "services:\n  svc:\n    image: nginx\n    volumes:\n      - type: bind\n        source: ./src\n        target: /app/src\n        read_only: true\n";
+        let file = parse_compose(yaml).expect("should parse long-form bind");
+        let svc = file.services.get("svc").expect("svc present");
+        assert_eq!(svc.volumes.len(), 1);
+        assert_eq!(
+            svc.volumes[0],
+            VolumeSpec::Bind {
+                host_path: PathBuf::from("./src"),
+                container_path: PathBuf::from("/app/src"),
+                read_only: true,
+            }
+        );
+    }
+
+    #[test]
+    fn volume_long_form_bind_missing_source_returns_invalid_service() {
+        // Long-form bind with no source → InvalidService error.
+        let yaml = "services:\n  svc:\n    image: nginx\n    volumes:\n      - type: bind\n        target: /app/src\n";
+        let err = parse_compose(yaml).expect_err("should fail with missing source");
+        assert!(
+            matches!(
+                &err,
+                ComposeParseError::InvalidService { name, message }
+                    if name == "svc" && message.contains("bind volume missing")
+            ),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn volume_long_form_named_with_source() {
+        // Long-form volume type with source → Named variant.
+        let yaml = "services:\n  svc:\n    image: nginx\n    volumes:\n      - type: volume\n        source: mydata\n        target: /var/lib/data\n";
+        let file = parse_compose(yaml).expect("should parse long-form named");
+        let svc = file.services.get("svc").expect("svc present");
+        assert_eq!(
+            svc.volumes[0],
+            VolumeSpec::Named {
+                volume_name: "mydata".to_string(),
+                container_path: PathBuf::from("/var/lib/data"),
+                read_only: false,
+            }
+        );
+    }
+
+    #[test]
+    fn volume_long_form_volume_without_source_is_anonymous() {
+        // Long-form volume type with no source → Anonymous variant.
+        let yaml = "services:\n  svc:\n    image: nginx\n    volumes:\n      - type: volume\n        target: /tmp/cache\n";
+        let file = parse_compose(yaml).expect("should parse long-form anonymous");
+        let svc = file.services.get("svc").expect("svc present");
+        assert_eq!(
+            svc.volumes[0],
+            VolumeSpec::Anonymous {
+                container_path: PathBuf::from("/tmp/cache"),
+            }
+        );
+    }
+
+    #[test]
+    fn volume_long_form_unknown_kind_falls_back_to_anonymous() {
+        // Unknown `type` string → Anonymous fallback, no error.
+        let yaml = "services:\n  svc:\n    image: nginx\n    volumes:\n      - type: tmpfs\n        target: /tmp\n";
+        let file = parse_compose(yaml).expect("should tolerate unknown volume type");
+        let svc = file.services.get("svc").expect("svc present");
+        assert_eq!(
+            svc.volumes[0],
+            VolumeSpec::Anonymous {
+                container_path: PathBuf::from("/tmp"),
+            }
+        );
     }
 }
