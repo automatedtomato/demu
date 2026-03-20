@@ -10,6 +10,7 @@
 pub mod compose;
 mod copy;
 pub mod error;
+pub mod mount;
 mod run_sim;
 mod runner;
 

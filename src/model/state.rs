@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::fs::VirtualFs;
+use super::provenance::MountInfo;
 use super::warning::Warning;
 
 /// A registry of all completed build stages, indexed by name and by number.
@@ -222,6 +223,13 @@ pub struct PreviewState {
 
     /// The currently active build stage alias, if any (used for multi-stage builds).
     pub active_stage: Option<String>,
+
+    /// Volume mount shadows applied by the Compose engine.
+    ///
+    /// Each entry records a volume mount declared in the Compose service definition.
+    /// Populated by `engine::mount::apply_mount_shadows` after the Dockerfile pipeline runs.
+    /// Used by the `:mounts` REPL command to list active mount shadows.
+    pub mounts: Vec<MountInfo>,
 }
 
 impl Default for PreviewState {
@@ -239,6 +247,7 @@ impl Default for PreviewState {
             layers: Vec::new(),
             warnings: Vec::new(),
             active_stage: None,
+            mounts: Vec::new(),
         }
     }
 }

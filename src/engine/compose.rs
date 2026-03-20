@@ -34,6 +34,7 @@ use crate::model::warning::Warning;
 use crate::parser::dockerfile::parse_dockerfile;
 
 use super::copy::ensure_ancestors;
+use super::mount::apply_mount_shadows;
 
 /// Errors that prevent the Compose engine from producing a `PreviewState`.
 ///
@@ -231,6 +232,10 @@ pub fn run_compose(
         state.cwd = new_cwd;
     }
 
+    // ── 6. Apply volume mount shadows ─────────────────────────────────────────
+
+    apply_mount_shadows(&mut state, &service.volumes);
+
     Ok(ComposeEngineOutput {
         state,
         compose_file: compose_file.clone(),
@@ -268,7 +273,9 @@ fn parse_env_file(content: &str, env: &mut std::collections::BTreeMap<String, St
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::model::compose::{BuildConfig, ComposeFile, EnvEntry, Service, VolumeDefinition};
+    use crate::model::compose::{
+        BuildConfig, ComposeFile, EnvEntry, Service, VolumeDefinition, VolumeSpec,
+    };
     use std::collections::BTreeMap;
     use std::io::Write;
     use tempfile::TempDir;
@@ -621,5 +628,49 @@ mod tests {
 
         assert_eq!(output.selected_service, "svc");
         assert!(output.compose_file.services.contains_key("svc"));
+    }
+
+    // ── test 13: volume mounts are applied as shadows ─────────────────────────
+
+    #[test]
+    fn bind_volume_recorded_in_state_mounts() {
+        let (dir, mut compose) = make_build_fixture("FROM scratch\nWORKDIR /app\n");
+
+        compose.services.get_mut("svc").unwrap().volumes = vec![VolumeSpec::Bind {
+            host_path: PathBuf::from("./data"),
+            container_path: PathBuf::from("/data"),
+            read_only: false,
+        }];
+
+        let output = run_compose(&compose, "svc", dir.path()).expect("should succeed");
+
+        assert_eq!(
+            output.state.mounts.len(),
+            1,
+            "one bind mount must be recorded"
+        );
+        assert!(
+            output.state.mounts[0]
+                .description
+                .contains("bind mount from"),
+            "description must mention bind mount; got: {}",
+            output.state.mounts[0].description
+        );
+    }
+
+    #[test]
+    fn named_volume_recorded_in_state_mounts() {
+        let (dir, mut compose) = make_build_fixture("FROM scratch\n");
+
+        compose.services.get_mut("svc").unwrap().volumes = vec![VolumeSpec::Named {
+            volume_name: "my-cache".to_string(),
+            container_path: PathBuf::from("/cache"),
+            read_only: false,
+        }];
+
+        let output = run_compose(&compose, "svc", dir.path()).expect("should succeed");
+
+        assert_eq!(output.state.mounts.len(), 1);
+        assert_eq!(output.state.mounts[0].description, "named volume: my-cache");
     }
 }
