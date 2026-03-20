@@ -1,11 +1,16 @@
 # demu — task tracking
 
-Milestone: [Release v0.3.0](https://github.com/automatedtomato/demu/milestone/3)
-Tracking issue: [#39](https://github.com/automatedtomato/demu/issues/39)
+Milestone: [Release v0.4.0](https://github.com/automatedtomato/demu/milestone/4)
+Tracking issue: [#47](https://github.com/automatedtomato/demu/issues/47)
 
 ## In progress
+- [x] [#48](https://github.com/automatedtomato/demu/issues/48) feat: Compose YAML parser — implementation complete, 27 new tests (18 unit + 9 integration), all 635 tests passing
 
 ## Up next
+- [ ] [#49](https://github.com/automatedtomato/demu/issues/49) feat: CLI `--compose` and `--service` flags
+- [ ] [#50](https://github.com/automatedtomato/demu/issues/50) feat: Compose engine — service merge
+- [ ] [#51](https://github.com/automatedtomato/demu/issues/51) feat: mount shadow model
+- [ ] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands
 
 ## Done
 

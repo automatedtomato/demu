@@ -1,0 +1,5 @@
+# Syntactically broken YAML — the parser must return InvalidYaml.
+services:
+  api:
+    build: [unclosed bracket
+    image: nginx

@@ -1,0 +1,29 @@
+# Full fixture: exercises build config, env list, bind volumes, depends_on, and
+# named volumes across two services.
+services:
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile.dev
+    environment:
+      - NODE_ENV=production
+      - DEBUG
+    volumes:
+      - ./src:/app/src
+      - ./src:/app/src:ro
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: appdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

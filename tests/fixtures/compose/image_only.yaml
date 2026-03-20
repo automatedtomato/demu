@@ -1,0 +1,4 @@
+# Minimal fixture: single service using a pre-built image with no build config.
+services:
+  db:
+    image: postgres:15
