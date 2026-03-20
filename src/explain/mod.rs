@@ -8,7 +8,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::model::{
-    provenance::{MountInfo, MountKind, ProvenanceSource},
+    provenance::{MountInfo, ProvenanceSource},
     state::PreviewState,
 };
 use crate::output::sanitize::sanitize_for_terminal;
@@ -122,17 +122,10 @@ fn format_source(source: &ProvenanceSource) -> String {
 
 /// Format a `MountInfo` as a human-readable string.
 ///
-/// The output describes the kind of mount and the source path or name.
-/// The `source` field is user-supplied and sanitized before interpolation.
+/// Returns the pre-formatted `description` field, sanitizing it against
+/// ANSI escape injection before emitting it to the terminal.
 fn format_mount(mount: &MountInfo) -> String {
-    let safe_source = sanitize_for_terminal(&mount.source);
-    match mount.mount_type {
-        MountKind::Bind => format!("bind mount from {safe_source}"),
-        MountKind::Volume => format!("volume mount: {safe_source}"),
-        MountKind::Tmpfs => "tmpfs mount".to_string(),
-        MountKind::Cache => format!("cache mount from {safe_source}"),
-        MountKind::Secret => format!("secret mount: {safe_source}"),
-    }
+    sanitize_for_terminal(&mount.description)
 }
 
 #[cfg(test)]
@@ -141,7 +134,7 @@ mod tests {
     use super::*;
     use crate::model::{
         fs::{FileNode, FsNode},
-        provenance::{MountInfo, MountKind, Provenance, ProvenanceSource},
+        provenance::{MountInfo, Provenance, ProvenanceSource},
         state::PreviewState,
     };
     use std::path::PathBuf;
@@ -268,8 +261,9 @@ mod tests {
             host_path: PathBuf::from("src/main.rs"),
         });
         prov.shadowed_by_mount = Some(MountInfo {
-            source: "/host/path".to_string(),
-            mount_type: MountKind::Bind,
+            container_path: PathBuf::from("/app/main.rs"),
+            read_only: false,
+            description: "bind mount from /host/path".to_string(),
         });
         let state = state_with_node("/app/main.rs", prov);
         let output = explain_path(&state, Path::new("/app/main.rs")).expect("should succeed");
@@ -352,42 +346,36 @@ mod tests {
         );
     }
 
-    // --- mount kind format tests ---
+    // --- mount description format tests ---
 
     #[test]
-    fn format_mount_volume_shows_volume_name() {
+    fn format_mount_returns_description() {
         let mount = MountInfo {
-            source: "myvolume".to_string(),
-            mount_type: MountKind::Volume,
+            container_path: PathBuf::from("/data"),
+            read_only: false,
+            description: "named volume: myvolume".to_string(),
         };
-        assert_eq!(format_mount(&mount), "volume mount: myvolume");
+        assert_eq!(format_mount(&mount), "named volume: myvolume");
     }
 
     #[test]
-    fn format_mount_tmpfs_shows_tmpfs_label() {
+    fn format_mount_anonymous_volume() {
         let mount = MountInfo {
-            source: "ignored".to_string(),
-            mount_type: MountKind::Tmpfs,
+            container_path: PathBuf::from("/tmp"),
+            read_only: false,
+            description: "anonymous volume".to_string(),
         };
-        assert_eq!(format_mount(&mount), "tmpfs mount");
+        assert_eq!(format_mount(&mount), "anonymous volume");
     }
 
     #[test]
-    fn format_mount_cache_shows_source() {
+    fn format_mount_bind_description() {
         let mount = MountInfo {
-            source: "/cache/go".to_string(),
-            mount_type: MountKind::Cache,
+            container_path: PathBuf::from("/app"),
+            read_only: true,
+            description: "bind mount from ./src".to_string(),
         };
-        assert_eq!(format_mount(&mount), "cache mount from /cache/go");
-    }
-
-    #[test]
-    fn format_mount_secret_shows_name() {
-        let mount = MountInfo {
-            source: "mysecret".to_string(),
-            mount_type: MountKind::Secret,
-        };
-        assert_eq!(format_mount(&mount), "secret mount: mysecret");
+        assert_eq!(format_mount(&mount), "bind mount from ./src");
     }
 
     // --- sanitization of user-controlled fields ---
@@ -423,10 +411,11 @@ mod tests {
     }
 
     #[test]
-    fn format_mount_strips_ansi_escape_in_source() {
+    fn format_mount_strips_ansi_escape_in_description() {
         let mount = MountInfo {
-            source: "/host/\x1b[2Jpath".to_string(),
-            mount_type: MountKind::Bind,
+            container_path: PathBuf::from("/app"),
+            read_only: false,
+            description: "bind mount from /host/\x1b[2Jpath".to_string(),
         };
         let result = format_mount(&mount);
         assert!(

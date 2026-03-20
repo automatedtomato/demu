@@ -11,4 +11,5 @@ pub mod explain;
 pub mod history;
 pub mod installed;
 pub mod layers;
+pub mod mounts;
 pub mod reload;

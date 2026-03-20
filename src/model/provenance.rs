@@ -30,31 +30,25 @@ pub enum ProvenanceSource {
     EnvSet { key: String, value: String },
 }
 
-/// The type of a Docker mount (`--mount=type=...`).
+/// Metadata about a volume mount that shadows a path in the virtual filesystem.
 ///
-/// Using an enum rather than a free-form string prevents typos at call sites
-/// and allows exhaustive matching in the engine and `:explain` output.
-#[derive(Debug, Clone, PartialEq)]
-pub enum MountKind {
-    /// `--mount=type=bind` — bind-mounts a host path into the build.
-    Bind,
-    /// `--mount=type=volume` — mounts a named volume.
-    Volume,
-    /// `--mount=type=tmpfs` — mounts an ephemeral tmpfs.
-    Tmpfs,
-    /// `--mount=type=cache` — mounts a persistent cache directory.
-    Cache,
-    /// `--mount=type=secret` — mounts a secret file.
-    Secret,
-}
-
-/// Metadata about a bind/volume mount that shadows a path in the virtual filesystem.
+/// `MountInfo` records where a volume mounts inside the container (`container_path`),
+/// whether it is read-only, and a pre-formatted human-readable `description` that is
+/// used by both `:explain` and `:mounts`.  The description is computed from the
+/// `VolumeSpec` variant at the time the mount shadow is applied by `engine::mount`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MountInfo {
-    /// The source of the mount (e.g. host path, named volume, or stage reference).
-    pub source: String,
-    /// The category of mount.
-    pub mount_type: MountKind,
+    /// The absolute container path at which this volume is mounted.
+    pub container_path: PathBuf,
+    /// `true` when the mount was declared `read_only` in the Compose file.
+    pub read_only: bool,
+    /// Pre-formatted human-readable description of the mount source.
+    ///
+    /// Examples:
+    /// - `"bind mount from ./data"`
+    /// - `"named volume: npm-cache"`
+    /// - `"anonymous volume"`
+    pub description: String,
 }
 
 /// Provenance record attached to every `FsNode`.
@@ -166,35 +160,46 @@ mod tests {
     // --- MountInfo construction ---
 
     #[test]
-    fn mount_info_stores_source_and_kind() {
+    fn mount_info_stores_container_path_and_description() {
         let mount = MountInfo {
-            source: "/host/cache".to_string(),
-            mount_type: MountKind::Bind,
+            container_path: PathBuf::from("/data"),
+            read_only: false,
+            description: "bind mount from ./data".to_string(),
         };
-        assert_eq!(mount.source, "/host/cache");
-        assert_eq!(mount.mount_type, MountKind::Bind);
+        assert_eq!(mount.container_path, PathBuf::from("/data"));
+        assert!(!mount.read_only);
+        assert_eq!(mount.description, "bind mount from ./data");
     }
 
     #[test]
-    fn all_mount_kinds_are_mutually_distinct() {
-        let kinds = [
-            MountKind::Bind,
-            MountKind::Volume,
-            MountKind::Tmpfs,
-            MountKind::Cache,
-            MountKind::Secret,
-        ];
-        // Every pair must be distinct — catches any accidental mapping of
-        // multiple variants to the same underlying discriminant.
-        for i in 0..kinds.len() {
-            for j in 0..kinds.len() {
-                if i == j {
-                    assert_eq!(kinds[i], kinds[j], "variant {i} should equal itself");
-                } else {
-                    assert_ne!(kinds[i], kinds[j], "variants {i} and {j} must be distinct");
-                }
-            }
-        }
+    fn mount_info_read_only_flag() {
+        let mount = MountInfo {
+            container_path: PathBuf::from("/cache"),
+            read_only: true,
+            description: "named volume: my-cache".to_string(),
+        };
+        assert!(mount.read_only);
+    }
+
+    #[test]
+    fn mount_info_anonymous_volume_description() {
+        let mount = MountInfo {
+            container_path: PathBuf::from("/tmp/scratch"),
+            read_only: false,
+            description: "anonymous volume".to_string(),
+        };
+        assert_eq!(mount.description, "anonymous volume");
+    }
+
+    #[test]
+    fn mount_info_clone_is_independent() {
+        let original = MountInfo {
+            container_path: PathBuf::from("/data"),
+            read_only: false,
+            description: "bind mount from ./data".to_string(),
+        };
+        let clone = original.clone();
+        assert_eq!(original, clone);
     }
 
     // --- Provenance::new ---

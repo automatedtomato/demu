@@ -66,6 +66,18 @@ impl FsNode {
             FsNode::Symlink(s) => &s.provenance,
         }
     }
+
+    /// Return a mutable reference to the provenance record embedded in this node.
+    ///
+    /// Used by the mount shadow engine to attach `MountInfo` to existing nodes
+    /// without cloning the entire node.
+    pub fn provenance_mut(&mut self) -> &mut Provenance {
+        match self {
+            FsNode::File(f) => &mut f.provenance,
+            FsNode::Directory(d) => &mut d.provenance,
+            FsNode::Symlink(s) => &mut s.provenance,
+        }
+    }
 }
 
 /// An in-memory virtual filesystem backed by a flat path-to-node map.
@@ -105,6 +117,14 @@ impl VirtualFs {
     /// Return a reference to the node at `path`, or `None` if it does not exist.
     pub fn get(&self, path: &Path) -> Option<&FsNode> {
         self.nodes.get(path)
+    }
+
+    /// Return a mutable reference to the node at `path`, or `None` if it does not exist.
+    ///
+    /// Used by the mount shadow engine to attach mount metadata to existing nodes
+    /// in-place without re-inserting them.
+    pub fn get_mut(&mut self, path: &Path) -> Option<&mut FsNode> {
+        self.nodes.get_mut(path)
     }
 
     /// Return `true` if a node exists at `path`.

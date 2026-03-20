@@ -63,6 +63,8 @@ pub enum ParsedCommand {
     },
     /// `:reload` — re-read and re-process the Dockerfile.
     Reload,
+    /// `:mounts` — list all volume mount shadows applied by the Compose engine.
+    Mounts,
     /// The input was empty or only whitespace.
     Empty,
     /// The input did not match any known command.
@@ -110,6 +112,7 @@ pub fn parse_input(line: &str) -> ParsedCommand {
         ":history" => ParsedCommand::History,
         ":installed" => ParsedCommand::Installed,
         ":reload" => ParsedCommand::Reload,
+        ":mounts" => ParsedCommand::Mounts,
         _ => ParsedCommand::Unknown {
             input: trimmed.to_string(),
         },
@@ -812,6 +815,29 @@ mod tests {
             parse_input("WHICH curl"),
             ParsedCommand::Unknown {
                 input: "WHICH curl".to_string()
+            }
+        );
+    }
+
+    // --- :mounts ---
+
+    #[test]
+    fn mounts_bare_returns_mounts() {
+        assert_eq!(parse_input(":mounts"), ParsedCommand::Mounts);
+    }
+
+    #[test]
+    fn mounts_with_trailing_whitespace_returns_mounts() {
+        assert_eq!(parse_input(":mounts  "), ParsedCommand::Mounts);
+    }
+
+    #[test]
+    fn mounts_uppercase_is_unknown() {
+        // Custom commands are case-sensitive — :MOUNTS is not :mounts.
+        assert_eq!(
+            parse_input(":MOUNTS"),
+            ParsedCommand::Unknown {
+                input: ":MOUNTS".to_string()
             }
         );
     }

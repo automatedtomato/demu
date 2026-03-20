@@ -38,6 +38,7 @@ CUSTOM COMMANDS (prefix with :)
   :installed               show simulated package installs
   :warnings                show simulation warnings
   :reload                  re-read and re-process the Dockerfile
+  :mounts                  list volume mount shadows (Compose mode)
 
 NOTE: demu is a preview shell. Commands show simulated state, not real containers.
 ";
@@ -136,6 +137,14 @@ mod tests {
         assert!(
             run().contains(":reload"),
             "output must mention ':reload' in the custom commands section"
+        );
+    }
+
+    #[test]
+    fn help_contains_mounts() {
+        assert!(
+            run().contains(":mounts"),
+            "output must mention ':mounts' in the custom commands section"
         );
     }
 }

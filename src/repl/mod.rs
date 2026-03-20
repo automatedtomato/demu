@@ -27,7 +27,7 @@ use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
 use crate::repl::commands::{apt, cat, cd, env_cmd, find, help, ls, pip, pwd, which};
 use crate::repl::config::ReplConfig;
-use crate::repl::custom::{explain, history, installed, layers, reload};
+use crate::repl::custom::{explain, history, installed, layers, mounts, reload};
 use crate::repl::error::ReplError;
 use crate::repl::parse::{parse_input, ParsedCommand};
 
@@ -170,6 +170,9 @@ pub fn dispatch(
         }
         ParsedCommand::Explain { path } => {
             explain::execute(state, &path, writer)?;
+        }
+        ParsedCommand::Mounts => {
+            mounts::execute(state, writer)?;
         }
         ParsedCommand::Exit => {
             return Ok(false);
