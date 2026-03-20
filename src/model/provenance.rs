@@ -44,6 +44,12 @@ pub struct MountInfo {
     pub read_only: bool,
     /// Pre-formatted human-readable description of the mount source.
     ///
+    /// # Security note
+    /// This string is assembled from user-controlled YAML content (host paths,
+    /// volume names) and **must** be passed through `sanitize_for_terminal`
+    /// before writing to any terminal output. Callers that skip sanitization
+    /// are vulnerable to ANSI escape injection.
+    ///
     /// Examples:
     /// - `"bind mount from ./data"`
     /// - `"named volume: npm-cache"`

@@ -11,8 +11,6 @@
 // The host filesystem is never accessed — `host_path` values in `Bind`
 // specs are used only as display strings in the mount description.
 
-use std::path::Path;
-
 use crate::model::compose::VolumeSpec;
 use crate::model::provenance::MountInfo;
 use crate::model::state::PreviewState;
@@ -29,10 +27,11 @@ use crate::model::state::PreviewState;
 pub fn apply_mount_shadows(state: &mut PreviewState, volumes: &[VolumeSpec]) {
     for vol in volumes {
         let info = build_mount_info(vol);
-        let container_path = container_path_of(vol);
 
-        // Shadow any FS node that already exists at this container path.
-        if let Some(node) = state.fs.get_mut(container_path) {
+        // Shadow any FS node that already exists at the container path.
+        // Using `info.container_path` directly avoids a redundant extraction
+        // and keeps the path used for FS lookup in sync with the stored mount.
+        if let Some(node) = state.fs.get_mut(&info.container_path) {
             node.provenance_mut().shadowed_by_mount = Some(info.clone());
         }
 
@@ -71,15 +70,6 @@ fn build_mount_info(spec: &VolumeSpec) -> MountInfo {
             read_only: false,
             description: "anonymous volume".to_string(),
         },
-    }
-}
-
-/// Extract the container path from any `VolumeSpec` variant.
-fn container_path_of(spec: &VolumeSpec) -> &Path {
-    match spec {
-        VolumeSpec::Bind { container_path, .. } => container_path,
-        VolumeSpec::Named { container_path, .. } => container_path,
-        VolumeSpec::Anonymous { container_path } => container_path,
     }
 }
 
@@ -288,5 +278,50 @@ mod tests {
         let mut state = PreviewState::default();
         apply_mount_shadows(&mut state, &[]);
         assert!(state.mounts.is_empty());
+    }
+
+    // --- duplicate container path: last-writer-wins for shadowed_by_mount ---
+    //
+    // When two VolumeSpec entries share the same container path, state.mounts
+    // records both (so `:mounts` shows two entries) but the FS node's
+    // shadowed_by_mount carries only the last one (last-writer-wins).
+    // This test specifies that behavior explicitly so any future change is
+    // visible.
+
+    #[test]
+    fn duplicate_container_path_last_writer_wins_for_fs_shadow() {
+        let mut state = state_with_dir("/data");
+        let volumes = vec![
+            VolumeSpec::Bind {
+                host_path: PathBuf::from("./first"),
+                container_path: PathBuf::from("/data"),
+                read_only: false,
+            },
+            VolumeSpec::Named {
+                volume_name: "second".to_string(),
+                container_path: PathBuf::from("/data"),
+                read_only: true,
+            },
+        ];
+        apply_mount_shadows(&mut state, &volumes);
+
+        // Both entries are recorded in state.mounts.
+        assert_eq!(state.mounts.len(), 2, "both mounts must be in state.mounts");
+
+        // The FS node at /data retains only the last mount shadow (last-writer-wins).
+        let node = state
+            .fs
+            .get(&PathBuf::from("/data"))
+            .expect("/data must exist");
+        let shadow = node
+            .provenance()
+            .shadowed_by_mount
+            .as_ref()
+            .expect("must be shadowed");
+        assert_eq!(
+            shadow.description, "named volume: second",
+            "last VolumeSpec must win for shadowed_by_mount; got: {}",
+            shadow.description
+        );
     }
 }
