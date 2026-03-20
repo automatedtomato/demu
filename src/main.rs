@@ -1,6 +1,8 @@
 // `demu` binary entrypoint.
 //
 // Wires together the full preview pipeline:
+//
+// Dockerfile mode (default):
 //   1. Parse CLI arguments with clap (`Cli`).
 //   2. Validate the Dockerfile path (exists and is a regular file).
 //   3. Canonicalize the path to derive an absolute build-context directory.
@@ -10,6 +12,14 @@
 //   7. Print any engine warnings to stderr.
 //   8. Hand the resulting `PreviewState` to the interactive REPL.
 //
+// Compose mode (`--compose`):
+//   1. Parse CLI arguments with clap (`Cli`).
+//   2. Validate `--service` is present.
+//   3. Validate and canonicalize the Compose file path.
+//   4. Read and parse the Compose file.
+//   5. Validate the service name exists.
+//   6. Enter the REPL with a default `PreviewState` (engine merge comes in #50).
+//
 // `run_cli` returns `anyhow::Result<()>` so that every error path funnels
 // through the single `main` handler, which formats the message as
 // `"demu: <err>"` before exiting with code 1.
@@ -17,9 +27,89 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use demu::{
-    engine, output::sanitize::sanitize_for_terminal, parser::dockerfile::parse_dockerfile,
-    repl::config::ReplConfig, repl::run_repl, Cli,
+    engine,
+    model::state::PreviewState,
+    output::sanitize::sanitize_for_terminal,
+    parser::{compose::parse_compose, dockerfile::parse_dockerfile},
+    repl::config::{ComposeContext, ReplConfig},
+    repl::run_repl,
+    Cli,
 };
+
+/// Compose-mode pipeline.
+///
+/// Validates flags, parses the Compose file, selects the service, and enters
+/// the REPL with a default `PreviewState`. Engine integration (#50) will replace
+/// the default state with a fully merged Compose view.
+fn run_compose_pipeline(cli: &Cli) -> Result<()> {
+    // ── 1. Require --service ─────────────────────────────────────────────────
+
+    let service_name = cli.service.as_deref().ok_or_else(|| {
+        anyhow::anyhow!("--service <name> is required in compose mode (--compose)")
+    })?;
+
+    // ── 2. Validate the Compose file path ────────────────────────────────────
+
+    if !cli.file.exists() {
+        anyhow::bail!("Compose file not found: '{}'", cli.file.display());
+    }
+    if !cli.file.is_file() {
+        anyhow::bail!(
+            "'{}' is not a regular file — pass the path to a compose.yaml",
+            cli.file.display()
+        );
+    }
+
+    let canonical = cli
+        .file
+        .canonicalize()
+        .with_context(|| format!("cannot resolve path '{}'", cli.file.display()))?;
+
+    // ── 3. Read and parse the Compose file ───────────────────────────────────
+
+    let content = std::fs::read_to_string(&canonical)
+        .with_context(|| format!("cannot read '{}'", canonical.display()))?;
+
+    let compose_file = parse_compose(&content)
+        .map_err(|e| anyhow::anyhow!("failed to parse '{}': {}", canonical.display(), e))?;
+
+    // ── 4. Validate the service name ─────────────────────────────────────────
+
+    if !compose_file.services.contains_key(service_name) {
+        let safe_name = sanitize_for_terminal(service_name);
+        let available = compose_file
+            .services
+            .keys()
+            .map(|k| sanitize_for_terminal(k))
+            .collect::<Vec<_>>()
+            .join(", ");
+        anyhow::bail!(
+            "service '{}' not found; available services: {}",
+            safe_name,
+            available
+        );
+    }
+
+    // ── 5. Build the session config ──────────────────────────────────────────
+
+    // Engine integration (#50) will replace the stub state with a full merged
+    // Compose preview. For now, enter the REPL with an empty default state so
+    // that the flags and routing are functional end-to-end.
+    let mut state = PreviewState::default();
+
+    let compose_context = ComposeContext {
+        compose_file,
+        selected_service: service_name.to_string(),
+    };
+
+    let repl_config = ReplConfig::new(canonical).with_compose_context(Some(compose_context));
+
+    // ── 6. Enter the REPL ────────────────────────────────────────────────────
+
+    run_repl(&mut state, &repl_config)?;
+
+    Ok(())
+}
 
 /// Full CLI pipeline. Returns `Err` for any unrecoverable failure.
 ///
@@ -27,6 +117,12 @@ use demu::{
 /// formatting in `main` trivially straightforward.
 fn run_cli() -> Result<()> {
     let cli = Cli::parse();
+
+    // ── Route to Compose pipeline if --compose is set ────────────────────────
+
+    if cli.compose {
+        return run_compose_pipeline(&cli);
+    }
 
     // ── 1. Validate the path ─────────────────────────────────────────────────
 
