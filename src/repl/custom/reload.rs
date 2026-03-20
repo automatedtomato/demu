@@ -137,11 +137,12 @@ fn execute_compose(
     err_writer: &mut impl Write,
 ) -> Result<(), ReplError> {
     // The compose context must be present when this function is called.
-    // Safe to unwrap: checked by the caller (`execute`).
-    let ctx = config
-        .compose_context
-        .as_ref()
-        .expect("compose_context must be Some in execute_compose");
+    // The caller (`execute`) routes here only when `compose_context.is_some()`.
+    // Return early rather than panic to maintain the REPL's non-crashing guarantee.
+    let ctx = match config.compose_context.as_ref() {
+        Some(ctx) => ctx,
+        None => return Ok(()),
+    };
 
     // Step 1: Re-read the compose file.
     let content = match std::fs::read_to_string(&config.dockerfile_path) {
