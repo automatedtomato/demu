@@ -28,7 +28,6 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use demu::{
     engine,
-    model::state::PreviewState,
     output::sanitize::sanitize_for_terminal,
     parser::{compose::parse_compose, dockerfile::parse_dockerfile},
     repl::config::{ComposeContext, ReplConfig},
@@ -90,21 +89,42 @@ fn run_compose_pipeline(cli: &Cli) -> Result<()> {
         );
     }
 
-    // ── 5. Build the session config ──────────────────────────────────────────
+    // ── 5. Derive the compose directory ──────────────────────────────────────
 
-    // Engine integration (#50) will replace the stub state with a full merged
-    // Compose preview. For now, enter the REPL with an empty default state so
-    // that the flags and routing are functional end-to-end.
-    let mut state = PreviewState::default();
+    let compose_dir = canonical
+        .parent()
+        .with_context(|| {
+            format!(
+                "cannot determine parent directory of '{}'",
+                canonical.display()
+            )
+        })?
+        .to_path_buf();
+
+    // ── 6. Run the compose engine ─────────────────────────────────────────────
+
+    let compose_output = engine::run_compose(&compose_file, service_name, &compose_dir)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    // ── 7. Print warnings to stderr ───────────────────────────────────────────
+
+    let mut state = compose_output.state;
+    for warning in &state.warnings {
+        let safe = sanitize_for_terminal(&warning.to_string());
+        eprintln!("warning: {safe}");
+    }
+
+    // ── 8. Build the session config ───────────────────────────────────────────
 
     let compose_context = ComposeContext {
         compose_file,
         selected_service: service_name.to_string(),
     };
 
-    let repl_config = ReplConfig::new(canonical).with_compose_context(Some(compose_context));
+    let repl_config = ReplConfig::with_context(canonical, compose_dir)
+        .with_compose_context(Some(compose_context));
 
-    // ── 6. Enter the REPL ────────────────────────────────────────────────────
+    // ── 9. Enter the REPL ────────────────────────────────────────────────────
 
     run_repl(&mut state, &repl_config)?;
 

@@ -15,7 +15,7 @@ use std::io::Write;
 use crate::engine;
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
-use crate::parser::dockerfile::parse_dockerfile;
+use crate::parser::{compose::parse_compose, dockerfile::parse_dockerfile};
 use crate::repl::config::ReplConfig;
 use crate::repl::error::{io_err_mapper, ReplError};
 
@@ -34,6 +34,12 @@ pub fn execute(
     writer: &mut impl Write,
     err_writer: &mut impl Write,
 ) -> Result<(), ReplError> {
+    // Compose mode: re-parse the compose file and re-run the compose engine.
+    // The Dockerfile pipeline is the `else` branch below.
+    if config.compose_context.is_some() {
+        return execute_compose(state, config, writer, err_writer);
+    }
+
     // Step 1: Read the Dockerfile from disk.
     // Sanitize the path before embedding it in terminal output — the path
     // comes from the CLI argument and could theoretically contain control bytes.
@@ -119,11 +125,87 @@ pub fn execute(
     Ok(())
 }
 
+/// Reload for Compose mode.
+///
+/// Re-reads the compose file, re-parses it, and re-runs the compose engine
+/// for the previously selected service. On any error, the old state is
+/// preserved and the error is written to `err_writer`.
+fn execute_compose(
+    state: &mut PreviewState,
+    config: &ReplConfig,
+    writer: &mut impl Write,
+    err_writer: &mut impl Write,
+) -> Result<(), ReplError> {
+    // The compose context must be present when this function is called.
+    // The caller (`execute`) routes here only when `compose_context.is_some()`.
+    // Return early rather than panic to maintain the REPL's non-crashing guarantee.
+    let ctx = match config.compose_context.as_ref() {
+        Some(ctx) => ctx,
+        None => return Ok(()),
+    };
+
+    // Step 1: Re-read the compose file.
+    let content = match std::fs::read_to_string(&config.dockerfile_path) {
+        Ok(c) => c,
+        Err(e) => {
+            let safe_path = sanitize_for_terminal(&config.dockerfile_path.display().to_string());
+            writeln!(
+                err_writer,
+                "demu: cannot read compose file '{}': {e}",
+                safe_path
+            )
+            .map_err(io_err_mapper(":reload"))?;
+            return Ok(());
+        }
+    };
+
+    // Step 2: Re-parse the compose file.
+    let compose_file = match parse_compose(&content) {
+        Ok(cf) => cf,
+        Err(e) => {
+            let safe_msg = sanitize_for_terminal(&e.to_string());
+            writeln!(err_writer, "demu: compose parse error: {safe_msg}")
+                .map_err(io_err_mapper(":reload"))?;
+            return Ok(());
+        }
+    };
+
+    // Step 3: Re-run the compose engine.
+    let compose_output =
+        match engine::run_compose(&compose_file, &ctx.selected_service, &config.context_dir) {
+            Ok(out) => out,
+            Err(e) => {
+                let safe_msg = sanitize_for_terminal(&e.to_string());
+                writeln!(err_writer, "demu: compose engine error: {safe_msg}")
+                    .map_err(io_err_mapper(":reload"))?;
+                return Ok(());
+            }
+        };
+
+    // Step 4: Emit warnings, replace state, confirm.
+    let new_state = compose_output.state;
+    for w in &new_state.warnings {
+        writeln!(
+            err_writer,
+            "warning: {}",
+            sanitize_for_terminal(&w.to_string())
+        )
+        .map_err(io_err_mapper(":reload"))?;
+    }
+
+    let n = new_state.history.len();
+    *state = new_state;
+    writeln!(writer, "Reloaded. {n} instructions processed.").map_err(io_err_mapper(":reload"))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::repl::config::ReplConfig;
+    use crate::model::compose::ComposeFile;
+    use crate::repl::config::{ComposeContext, ReplConfig};
     use std::io::Write;
     use std::path::PathBuf;
     use tempfile::NamedTempFile;
@@ -507,6 +589,141 @@ mod tests {
         assert!(
             !state.env.contains_key("CTX_FINAL"),
             "state must NOT be final stage"
+        );
+    }
+
+    // ── Compose mode reload tests ─────────────────────────────────────────────
+
+    /// Build a minimal `ComposeFile` with a single build service.
+    fn make_compose_file_with_service(service_name: &str) -> ComposeFile {
+        use crate::model::compose::{BuildConfig, Service, VolumeDefinition};
+        use std::collections::BTreeMap;
+        let service = Service {
+            name: service_name.to_string(),
+            build: Some(BuildConfig {
+                context: std::path::PathBuf::from("."),
+                dockerfile: std::path::PathBuf::from("Dockerfile"),
+            }),
+            image: None,
+            environment: vec![],
+            env_file: vec![],
+            volumes: vec![],
+            working_dir: None,
+            depends_on: vec![],
+            ports: vec![],
+        };
+        let mut services = BTreeMap::new();
+        services.insert(service_name.to_string(), service);
+        ComposeFile {
+            services,
+            volumes: BTreeMap::new(),
+        }
+    }
+
+    // --- reload_compose_mode_replaces_state ---
+    //
+    // Compose mode reload: after a reload, the state reflects the env vars
+    // set in the Dockerfile referenced by the compose file.
+
+    #[test]
+    fn reload_compose_mode_replaces_state() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(
+            dir.path().join("Dockerfile"),
+            b"FROM scratch\nENV RELOAD_VAR=ok\n",
+        )
+        .expect("write Dockerfile");
+
+        let compose_yaml = format!(
+            "services:\n  api:\n    build:\n      context: .\n      dockerfile: Dockerfile\n    environment:\n      - COMPOSE_VAR=hello\n"
+        );
+        let compose_path = dir.path().join("compose.yaml");
+        std::fs::write(&compose_path, compose_yaml.as_bytes()).expect("write compose.yaml");
+
+        let ctx = ComposeContext {
+            compose_file: make_compose_file_with_service("api"),
+            selected_service: "api".to_string(),
+        };
+        let config = ReplConfig::with_context(compose_path, dir.path().to_path_buf())
+            .with_compose_context(Some(ctx));
+        let mut state = PreviewState::default();
+
+        let (result, out, _err) = run_reload(&mut state, &config);
+        assert!(result.is_ok(), "execute must return Ok; got: {result:?}");
+        assert!(
+            out.contains("Reloaded."),
+            "stdout must contain 'Reloaded.'; got: {out}"
+        );
+        assert_eq!(
+            state.env.get("COMPOSE_VAR").map(String::as_str),
+            Some("hello"),
+            "state must contain COMPOSE_VAR=hello from compose environment"
+        );
+    }
+
+    // --- reload_compose_mode_parse_error_keeps_old_state ---
+    //
+    // If the compose file is invalid YAML on reload, old state is preserved.
+
+    #[test]
+    fn reload_compose_mode_parse_error_keeps_old_state() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let compose_path = dir.path().join("compose.yaml");
+        std::fs::write(&compose_path, b"{ not: valid: yaml: [\n").expect("write bad yaml");
+
+        let ctx = ComposeContext {
+            compose_file: make_compose_file_with_service("api"),
+            selected_service: "api".to_string(),
+        };
+        let config = ReplConfig::with_context(compose_path, dir.path().to_path_buf())
+            .with_compose_context(Some(ctx));
+        let mut state = PreviewState::default();
+        state.cwd = PathBuf::from("/original");
+
+        let (result, _out, err) = run_reload(&mut state, &config);
+        assert!(
+            result.is_ok(),
+            "execute must return Ok on parse error; got: {result:?}"
+        );
+        assert_eq!(
+            state.cwd,
+            PathBuf::from("/original"),
+            "state must be preserved on parse error"
+        );
+        assert!(
+            err.contains("parse error") || err.contains("compose"),
+            "stderr must mention compose parse error; got: {err}"
+        );
+    }
+
+    // --- reload_compose_mode_emits_warnings ---
+    //
+    // An image-only service emits ImageOnlyService warning on reload.
+
+    #[test]
+    fn reload_compose_mode_emits_warnings() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let compose_path = dir.path().join("compose.yaml");
+        let compose_yaml = "services:\n  db:\n    image: postgres:15\n";
+        std::fs::write(&compose_path, compose_yaml.as_bytes()).expect("write compose");
+
+        let ctx = ComposeContext {
+            compose_file: make_compose_file_with_service("db"),
+            selected_service: "db".to_string(),
+        };
+        let config = ReplConfig::with_context(compose_path, dir.path().to_path_buf())
+            .with_compose_context(Some(ctx));
+        let mut state = PreviewState::default();
+
+        let (result, _out, err) = run_reload(&mut state, &config);
+        assert!(result.is_ok());
+        assert!(
+            err.contains("warning:"),
+            "stderr must contain 'warning:' for ImageOnlyService; got: {err}"
+        );
+        assert!(
+            err.contains("filesystem is empty") || err.contains("postgres"),
+            "warning must mention the image or empty filesystem; got: {err}"
         );
     }
 }

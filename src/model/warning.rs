@@ -107,6 +107,33 @@ pub enum Warning {
         /// Source line number (1-based) where the COPY instruction appeared.
         line: usize,
     },
+
+    /// A Compose service uses `image:` but has no `build:` context.
+    ///
+    /// The preview filesystem starts empty because the engine does not extract
+    /// real image filesystems. The REPL remains functional but shows no files.
+    ImageOnlyService {
+        /// The image reference from the service's `image:` field.
+        image: String,
+    },
+
+    /// An `env_file` referenced in a Compose service definition was not found.
+    ///
+    /// The missing file is skipped and the remaining env_files and environment
+    /// entries are still applied. The REPL continues normally.
+    EnvFileNotFound {
+        /// The path that was referenced but could not be read.
+        path: PathBuf,
+    },
+
+    /// A Compose `environment` entry used the bare `KEY` form (no value).
+    ///
+    /// At preview time the host environment is not available, so the key is
+    /// skipped rather than inserted with an empty or incorrect value.
+    UnresolvedEnvKey {
+        /// The environment variable key that had no value.
+        key: String,
+    },
 }
 
 /// # Terminal output safety
@@ -173,6 +200,19 @@ impl fmt::Display for Warning {
                     "COPY --from='{}' references unknown stage at line {} (skipped)",
                     stage, line
                 )
+            }
+            Warning::ImageOnlyService { image } => {
+                write!(
+                    f,
+                    "service uses image '{}' with no build context — filesystem is empty",
+                    image
+                )
+            }
+            Warning::EnvFileNotFound { path } => {
+                write!(f, "env_file '{}' not found — skipped", path.display())
+            }
+            Warning::UnresolvedEnvKey { key } => {
+                write!(f, "environment key '{}' has no value — skipped", key)
             }
         }
     }
@@ -576,5 +616,139 @@ mod tests {
             line: 5,
         };
         assert_eq!(w.clone(), w);
+    }
+
+    // --- ImageOnlyService ---
+
+    #[test]
+    fn image_only_service_stores_image() {
+        let w = Warning::ImageOnlyService {
+            image: "postgres:15".to_string(),
+        };
+        assert_eq!(
+            w,
+            Warning::ImageOnlyService {
+                image: "postgres:15".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn display_image_only_service_contains_image_name() {
+        let w = Warning::ImageOnlyService {
+            image: "postgres:15".to_string(),
+        };
+        let s = w.to_string();
+        assert!(!s.is_empty());
+        assert!(
+            s.contains("postgres:15"),
+            "display must contain image name, got: {s}"
+        );
+        assert!(
+            s.contains("filesystem is empty"),
+            "display must mention empty filesystem, got: {s}"
+        );
+    }
+
+    #[test]
+    fn display_image_only_service_full_string() {
+        let w = Warning::ImageOnlyService {
+            image: "redis:7".to_string(),
+        };
+        assert_eq!(
+            w.to_string(),
+            "service uses image 'redis:7' with no build context \u{2014} filesystem is empty"
+        );
+    }
+
+    // --- EnvFileNotFound ---
+
+    #[test]
+    fn env_file_not_found_stores_path() {
+        let path = PathBuf::from("/project/.env.prod");
+        let w = Warning::EnvFileNotFound { path: path.clone() };
+        assert_eq!(w, Warning::EnvFileNotFound { path });
+    }
+
+    #[test]
+    fn display_env_file_not_found_contains_path() {
+        let w = Warning::EnvFileNotFound {
+            path: PathBuf::from("/project/.env"),
+        };
+        let s = w.to_string();
+        assert!(!s.is_empty());
+        assert!(s.contains(".env"), "display must contain path, got: {s}");
+        assert!(
+            s.contains("not found"),
+            "display must say 'not found', got: {s}"
+        );
+    }
+
+    #[test]
+    fn display_env_file_not_found_full_string() {
+        let w = Warning::EnvFileNotFound {
+            path: PathBuf::from(".env"),
+        };
+        assert_eq!(w.to_string(), "env_file '.env' not found \u{2014} skipped");
+    }
+
+    // --- UnresolvedEnvKey ---
+
+    #[test]
+    fn unresolved_env_key_stores_key() {
+        let w = Warning::UnresolvedEnvKey {
+            key: "HOST_TOKEN".to_string(),
+        };
+        assert_eq!(
+            w,
+            Warning::UnresolvedEnvKey {
+                key: "HOST_TOKEN".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn display_unresolved_env_key_contains_key_name() {
+        let w = Warning::UnresolvedEnvKey {
+            key: "SECRET".to_string(),
+        };
+        let s = w.to_string();
+        assert!(!s.is_empty());
+        assert!(
+            s.contains("SECRET"),
+            "display must contain key name, got: {s}"
+        );
+        assert!(
+            s.contains("no value"),
+            "display must mention 'no value', got: {s}"
+        );
+    }
+
+    #[test]
+    fn display_unresolved_env_key_full_string() {
+        let w = Warning::UnresolvedEnvKey {
+            key: "MY_VAR".to_string(),
+        };
+        assert_eq!(
+            w.to_string(),
+            "environment key 'MY_VAR' has no value \u{2014} skipped"
+        );
+    }
+
+    #[test]
+    fn new_warning_variants_clone_and_equal() {
+        let w1 = Warning::ImageOnlyService {
+            image: "img".to_string(),
+        };
+        let w2 = Warning::EnvFileNotFound {
+            path: PathBuf::from("/a"),
+        };
+        let w3 = Warning::UnresolvedEnvKey {
+            key: "K".to_string(),
+        };
+        assert_eq!(w1.clone(), w1);
+        assert_eq!(w2.clone(), w2);
+        assert_eq!(w3.clone(), w3);
+        assert_ne!(w1, w3);
     }
 }
