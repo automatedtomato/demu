@@ -4,16 +4,16 @@ Milestone: [Release v0.4.0](https://github.com/automatedtomato/demu/milestone/4)
 Tracking issue: [#47](https://github.com/automatedtomato/demu/issues/47)
 
 ## In progress
-- [x] [#48](https://github.com/automatedtomato/demu/issues/48) feat: Compose YAML parser — implementation complete, 27 new tests (18 unit + 9 integration), all 635 tests passing
+- [ ] [#49](https://github.com/automatedtomato/demu/issues/49) feat: CLI `--compose` and `--service` flags
 
 ## Up next
-- [ ] [#49](https://github.com/automatedtomato/demu/issues/49) feat: CLI `--compose` and `--service` flags
 - [ ] [#50](https://github.com/automatedtomato/demu/issues/50) feat: Compose engine — service merge
 - [ ] [#51](https://github.com/automatedtomato/demu/issues/51) feat: mount shadow model
 - [ ] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands
 
 ## Done
 
+- [x] [#48](https://github.com/automatedtomato/demu/issues/48) feat: Compose YAML parser — merged [#53](https://github.com/automatedtomato/demu/pull/53)
 - [x] [#42](https://github.com/automatedtomato/demu/issues/42) feat: `COPY --from=<stage>` cross-stage file copying — merged [#45](https://github.com/automatedtomato/demu/pull/45)
 - [x] [#41](https://github.com/automatedtomato/demu/issues/41) feat: multi-stage build support + `--stage` CLI flag — merged [#44](https://github.com/automatedtomato/demu/pull/44)
 - [x] [#40](https://github.com/automatedtomato/demu/issues/40) feat: `:explain <path>` REPL command
