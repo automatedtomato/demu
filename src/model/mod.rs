@@ -13,13 +13,16 @@
 //! | `instruction` | `CopySource`, `Instruction` enum |
 //! | `fs` | `FileNode`, `DirNode`, `SymlinkNode`, `FsNode`, `VirtualFs` |
 //! | `state` | `InstalledRegistry`, `HistoryEntry`, `LayerSummary`, `PreviewState` |
+//! | `compose` | `ComposeFile`, `Service`, `BuildConfig`, `EnvEntry`, `VolumeSpec`, `VolumeDefinition` |
 
+pub mod compose;
 pub mod fs;
 pub mod instruction;
 pub mod provenance;
 pub mod state;
 pub mod warning;
 
+pub use compose::{BuildConfig, ComposeFile, EnvEntry, Service, VolumeDefinition, VolumeSpec};
 pub use fs::{FsNode, VirtualFs};
 pub use instruction::Instruction;
 pub use provenance::Provenance;
