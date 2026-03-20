@@ -50,6 +50,11 @@ pub struct Service {
     pub environment: Vec<EnvEntry>,
     /// Paths to env-file(s) whose contents are injected as environment
     /// variables.
+    ///
+    /// # Security note
+    /// Stored verbatim from the YAML — may contain `..` components. Callers
+    /// must validate these paths against the project root before reading them
+    /// from the host filesystem.
     pub env_file: Vec<PathBuf>,
     /// Volume mounts for this service.
     pub volumes: Vec<VolumeSpec>,
@@ -66,9 +71,19 @@ pub struct Service {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BuildConfig {
     /// The build context directory (e.g. `"."` or `"./services/api"`).
+    ///
+    /// # Security note
+    /// Stored verbatim from the YAML — may contain `..` components. Callers
+    /// that use this path for host filesystem access **must** canonicalize it
+    /// and verify it does not escape the declared project root before opening
+    /// any file.
     pub context: PathBuf,
     /// Path to the Dockerfile relative to `context`.  Defaults to
     /// `"Dockerfile"` when only a short-form string is given.
+    ///
+    /// # Security note
+    /// Stored verbatim from the YAML. Same path-containment requirement as
+    /// `context` applies.
     pub dockerfile: PathBuf,
 }
 
@@ -95,6 +110,12 @@ pub enum EnvEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub enum VolumeSpec {
     /// A bind mount from a host path into the container.
+    ///
+    /// # Security note
+    /// `host_path` is stored verbatim from the YAML and may contain `..`
+    /// components. It is used only as display/shadow metadata in the preview
+    /// — it must **never** be opened on the host filesystem without first
+    /// canonicalizing and confirming it does not escape the project root.
     Bind {
         host_path: PathBuf,
         container_path: PathBuf,
