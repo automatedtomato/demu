@@ -32,7 +32,7 @@ pub fn execute(
     compose_ctx: Option<&ComposeContext>,
     writer: &mut impl Write,
 ) -> Result<(), ReplError> {
-    let io_err = |e: std::io::Error| ReplError::InvalidArguments {
+    let io_err = |e: std::io::Error| ReplError::Io {
         command: ":mounts".to_string(),
         message: e.to_string(),
     };

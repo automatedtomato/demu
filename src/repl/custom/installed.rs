@@ -36,7 +36,7 @@ const MANAGER_ORDER: &[&str] = &["apt", "pip", "npm", "apk", "go"];
 /// When no packages are recorded at all, prints `"No packages recorded."`.
 ///
 /// All output goes to `writer`; I/O errors are mapped to
-/// [`ReplError::InvalidArguments`].
+/// [`ReplError::Io`].
 pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), ReplError> {
     // Map I/O errors into a uniform ReplError.
     let io_err = io_err_mapper(":installed");

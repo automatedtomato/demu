@@ -14,7 +14,7 @@ use crate::repl::error::ReplError;
 /// followed by a newline. The command never fails.
 pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), ReplError> {
     // Display the cwd as a string; PathBuf::display() is safe on all platforms.
-    writeln!(writer, "{}", state.cwd.display()).map_err(|e| ReplError::InvalidArguments {
+    writeln!(writer, "{}", state.cwd.display()).map_err(|e| ReplError::Io {
         command: "pwd".to_string(),
         message: e.to_string(),
     })
