@@ -247,11 +247,12 @@ pub fn run_compose(
             state.cwd.join(working_dir)
         };
 
-        // Normalize the virtual path by resolving `..` components. If `..`
-        // would traverse above `/`, clamp to `/` and emit a warning so the
-        // user knows the CWD was adjusted.
-        let new_cwd = normalize_virtual_path(&raw_cwd);
-        if new_cwd != raw_cwd {
+        // Normalize the virtual path by resolving `..` components. Only emit
+        // WorkdirEscapedRoot when a `..` component was discarded because it
+        // would go above `/` (genuine root escape). Normal `..` resolution
+        // (e.g. `/app/../etc → /etc`) does not trigger the warning.
+        let (new_cwd, was_clamped) = normalize_virtual_path(&raw_cwd);
+        if was_clamped {
             state.warnings.push(Warning::WorkdirEscapedRoot {
                 path: working_dir.clone(),
             });
@@ -289,18 +290,25 @@ pub fn run_compose(
 ///
 /// Unlike `Path::canonicalize`, this operates on the virtual filesystem and
 /// never touches the host. If `..` would traverse above the root `/`, that
-/// component is discarded and the path is clamped at `/`.
+/// component is discarded (the stack is already empty, so the pop is a no-op)
+/// and the path is effectively clamped at `/`.
+///
+/// Returns `(normalized_path, was_clamped)` where `was_clamped` is `true` only
+/// when a `..` was discarded because the stack was already empty (genuine root
+/// escape). A `..` that pops a real segment (e.g. `/app/../etc → /etc`) does
+/// **not** set `was_clamped`.
 ///
 /// # Examples
 /// ```text
-/// /app/../etc  →  /etc          (normal resolution)
-/// /app/../../  →  /             (clamped: cannot go above /)
-/// /a/b/c       →  /a/b/c        (no change)
+/// /app/../etc    →  /etc,  was_clamped = false  (normal resolution)
+/// /app/../../    →  /,     was_clamped = true   (genuine root escape)
+/// /a/b/c         →  /a/b/c, was_clamped = false (no change)
 /// ```
-fn normalize_virtual_path(path: &Path) -> PathBuf {
+fn normalize_virtual_path(path: &Path) -> (PathBuf, bool) {
     use std::path::Component;
 
     let mut components: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut was_clamped = false;
 
     for component in path.components() {
         match component {
@@ -312,8 +320,12 @@ fn normalize_virtual_path(path: &Path) -> PathBuf {
                 components.push(seg);
             }
             Component::ParentDir => {
-                // Pop the last segment; if empty, we're at root — ignore.
-                components.pop();
+                if components.is_empty() {
+                    // Would go above root — discard the component and record clamping.
+                    was_clamped = true;
+                } else {
+                    components.pop();
+                }
             }
             // CurDir (.) and Prefix are no-ops in this context.
             Component::CurDir | Component::Prefix(_) => {}
@@ -324,7 +336,7 @@ fn normalize_virtual_path(path: &Path) -> PathBuf {
     for seg in components {
         result.push(seg);
     }
-    result
+    (result, was_clamped)
 }
 
 /// Parse a `.env` file and insert entries into `env`.
@@ -884,6 +896,8 @@ mod tests {
     fn working_dir_absolute_with_dotdot_is_normalized() {
         let (dir, mut compose) = make_build_fixture("FROM scratch\n");
 
+        // /app/../../etc: first .. pops app (stack non-empty → no clamp),
+        // second .. hits empty stack → genuine root escape → clamped → warning emitted.
         compose.services.get_mut("svc").unwrap().working_dir =
             Some(PathBuf::from("/app/../../etc"));
 
@@ -894,41 +908,83 @@ mod tests {
             PathBuf::from("/etc"),
             "absolute path with .. should normalize correctly"
         );
-        // No warning needed — path stays within virtual FS (doesn't escape root).
+
+        // The second `..` escapes the virtual root, so WorkdirEscapedRoot must be emitted.
+        let has_warning = output
+            .state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::WorkdirEscapedRoot { .. }));
+        assert!(
+            has_warning,
+            "/app/../../etc has a genuine root escape — must emit WorkdirEscapedRoot"
+        );
+    }
+
+    #[test]
+    fn working_dir_dotdot_within_bounds_no_warning() {
+        let (dir, mut compose) = make_build_fixture("FROM scratch\n");
+
+        // /app/../etc: the .. pops app (stack non-empty → no clamping). No root escape.
+        compose.services.get_mut("svc").unwrap().working_dir = Some(PathBuf::from("/app/../etc"));
+
+        let output = run_compose(&compose, "svc", dir.path()).expect("should succeed");
+
+        assert_eq!(
+            output.state.cwd,
+            PathBuf::from("/etc"),
+            "path with single in-bounds .. should resolve to /etc"
+        );
+
+        let has_warning = output
+            .state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::WorkdirEscapedRoot { .. }));
+        assert!(
+            !has_warning,
+            "/app/../etc does not escape root — must NOT emit WorkdirEscapedRoot"
+        );
     }
 
     // ── test 16: normalize_virtual_path unit tests ────────────────────────────
 
     #[test]
     fn normalize_virtual_path_resolves_dotdot() {
-        assert_eq!(
-            normalize_virtual_path(&PathBuf::from("/app/../etc")),
-            PathBuf::from("/etc")
-        );
+        // Normal `..` resolution — no clamping.
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/app/../etc"));
+        assert_eq!(path, PathBuf::from("/etc"));
+        assert!(!clamped, "normal .. resolution must not set was_clamped");
     }
 
     #[test]
     fn normalize_virtual_path_clamps_above_root() {
-        assert_eq!(
-            normalize_virtual_path(&PathBuf::from("/../../etc")),
-            PathBuf::from("/etc")
-        );
+        // `..` on an empty stack — genuine root escape → was_clamped = true.
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/../../etc"));
+        assert_eq!(path, PathBuf::from("/etc"));
+        assert!(clamped, "/../../etc must set was_clamped");
     }
 
     #[test]
     fn normalize_virtual_path_no_change() {
-        assert_eq!(
-            normalize_virtual_path(&PathBuf::from("/app/data")),
-            PathBuf::from("/app/data")
-        );
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/app/data"));
+        assert_eq!(path, PathBuf::from("/app/data"));
+        assert!(!clamped, "path without .. must not set was_clamped");
     }
 
     #[test]
     fn normalize_virtual_path_root() {
-        assert_eq!(
-            normalize_virtual_path(&PathBuf::from("/")),
-            PathBuf::from("/")
-        );
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/"));
+        assert_eq!(path, PathBuf::from("/"));
+        assert!(!clamped, "root path must not set was_clamped");
+    }
+
+    #[test]
+    fn normalize_virtual_path_dotdot_within_bounds_not_clamped() {
+        // /a/b/../c resolves to /a/c — the .. pops b (non-empty stack), so no clamping.
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/a/b/../c"));
+        assert_eq!(path, PathBuf::from("/a/c"));
+        assert!(!clamped, "/a/b/../c must not set was_clamped");
     }
 
     // ── test 17: #62 — parse_env_file strips inline comments and quotes ───────
@@ -995,6 +1051,61 @@ mod tests {
         assert_eq!(
             env.get("URL").map(String::as_str),
             Some("https://example.com/?a=1")
+        );
+    }
+
+    #[test]
+    fn parse_env_file_hash_without_space_is_preserved() {
+        // `#` without a preceding space is NOT a comment — it is part of the value.
+        // Docker Compose env_file spec: only ` #` (space then hash) starts a comment.
+        let content = "KEY=value#nospace\n";
+        let mut env = BTreeMap::new();
+        parse_env_file(content, &mut env);
+        assert_eq!(
+            env.get("KEY").map(String::as_str),
+            Some("value#nospace"),
+            "hash without preceding space must be preserved; got: {:?}",
+            env.get("KEY")
+        );
+    }
+
+    // ── test 18: dockerfile traversal starts_with guard (not just canonicalize ENOENT) ──
+
+    #[test]
+    fn dockerfile_path_traversal_rejected_by_containment_check() {
+        use std::fs;
+
+        // Create two sibling temp directories: compose_dir and outside_dir.
+        let compose_dir = TempDir::new().expect("compose tempdir");
+        let outside_dir = TempDir::new().expect("outside tempdir");
+
+        // Write a real file in outside_dir so canonicalize() succeeds on it.
+        let outside_dockerfile = outside_dir.path().join("Dockerfile");
+        fs::write(&outside_dockerfile, "FROM scratch\n").expect("write outside Dockerfile");
+
+        // Build a relative path from compose_dir that traverses to outside_dir.
+        // sibling_rel = "../<outside_dir_name>/Dockerfile"
+        let outside_name = outside_dir
+            .path()
+            .file_name()
+            .expect("outside dir name")
+            .to_str()
+            .expect("utf-8 name");
+        let dockerfile_rel = PathBuf::from(format!("../{outside_name}/Dockerfile"));
+
+        let service = Service {
+            build: Some(BuildConfig {
+                context: PathBuf::from("."),
+                dockerfile: dockerfile_rel,
+            }),
+            ..bare_service("svc")
+        };
+        let compose = single_service_compose(service);
+
+        let err = run_compose(&compose, "svc", compose_dir.path()).expect_err("should fail");
+        assert!(
+            matches!(err, ComposeEngineError::DockerfileNotFound { .. }),
+            "dockerfile path escaping compose_dir must be rejected by starts_with guard; got: {err:?}"
         );
     }
 }
