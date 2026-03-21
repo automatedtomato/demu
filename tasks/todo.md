@@ -4,7 +4,15 @@ v0.4.0 complete. Planning next milestone.
 
 ## In progress
 
-## Up next
+## Up next (post-v0.4.0 backlog — from code/security reviews)
+
+- [ ] [#60](https://github.com/automatedtomato/demu/issues/60) security: path traversal in compose engine — build.context not containment-checked [HIGH]
+- [ ] [#61](https://github.com/automatedtomato/demu/issues/61) fix: working_dir relative-path escape in virtual FS
+- [ ] [#62](https://github.com/automatedtomato/demu/issues/62) fix: parse_env_file does not strip inline comments or quoted values
+- [ ] [#63](https://github.com/automatedtomato/demu/issues/63) fix: :depends/:services silent wrong output when selected_service not in map
+- [ ] [#64](https://github.com/automatedtomato/demu/issues/64) fix: :depends DFS expands shared subtrees multiple times without warning
+- [ ] [#65](https://github.com/automatedtomato/demu/issues/65) refactor: ReplError::InvalidArguments wrong for I/O write failures
+- [ ] [#66](https://github.com/automatedtomato/demu/issues/66) fix: --service without --compose silently ignored
 
 ## Done
 
