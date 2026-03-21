@@ -134,6 +134,16 @@ pub enum Warning {
         /// The environment variable key that had no value.
         key: String,
     },
+
+    /// A Compose `working_dir` with `..` components would have escaped the
+    /// virtual filesystem root `/`.
+    ///
+    /// The path is clamped to `/` and the REPL continues. The user should be
+    /// aware that the CWD they see may differ from what Docker would compute.
+    WorkdirEscapedRoot {
+        /// The raw (unnormalized) path from the Compose YAML.
+        path: PathBuf,
+    },
 }
 
 /// # Terminal output safety
@@ -213,6 +223,13 @@ impl fmt::Display for Warning {
             }
             Warning::UnresolvedEnvKey { key } => {
                 write!(f, "environment key '{}' has no value — skipped", key)
+            }
+            Warning::WorkdirEscapedRoot { path } => {
+                write!(
+                    f,
+                    "working_dir '{}' escapes the virtual root — clamped to /",
+                    path.display()
+                )
             }
         }
     }
@@ -750,5 +767,42 @@ mod tests {
         assert_eq!(w2.clone(), w2);
         assert_eq!(w3.clone(), w3);
         assert_ne!(w1, w3);
+    }
+
+    // --- WorkdirEscapedRoot ---
+
+    #[test]
+    fn workdir_escaped_root_stores_path() {
+        let w = Warning::WorkdirEscapedRoot {
+            path: PathBuf::from("../../../etc"),
+        };
+        assert_eq!(
+            w,
+            Warning::WorkdirEscapedRoot {
+                path: PathBuf::from("../../../etc")
+            }
+        );
+    }
+
+    #[test]
+    fn display_workdir_escaped_root_contains_path_and_clamped() {
+        let w = Warning::WorkdirEscapedRoot {
+            path: PathBuf::from("../../../etc"),
+        };
+        let s = w.to_string();
+        assert!(!s.is_empty());
+        assert!(
+            s.contains("../../../etc"),
+            "must contain original path; got: {s}"
+        );
+        assert!(s.contains("clamped"), "must mention clamping; got: {s}");
+    }
+
+    #[test]
+    fn workdir_escaped_root_clone_produces_equal_value() {
+        let w = Warning::WorkdirEscapedRoot {
+            path: PathBuf::from("../../bad"),
+        };
+        assert_eq!(w.clone(), w);
     }
 }
