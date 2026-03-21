@@ -1,15 +1,15 @@
 # demu — task tracking
 
-Milestone: [Release v0.4.0](https://github.com/automatedtomato/demu/milestone/4)
-Tracking issue: [#47](https://github.com/automatedtomato/demu/issues/47)
+v0.4.0 complete. Planning next milestone.
 
 ## In progress
-- [ ] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands
 
 ## Up next
 
 ## Done
 
+- [x] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands — merged [#59](https://github.com/automatedtomato/demu/pull/59)
+- [x] [#47](https://github.com/automatedtomato/demu/issues/47) feat: v0.4.0 Compose service preview [parent] — all child issues merged
 - [x] [#51](https://github.com/automatedtomato/demu/issues/51) feat: mount shadow model — merged [#58](https://github.com/automatedtomato/demu/pull/58)
 - [x] [#50](https://github.com/automatedtomato/demu/issues/50) feat: Compose engine — service merge — merged [#57](https://github.com/automatedtomato/demu/pull/57)
 - [x] [#49](https://github.com/automatedtomato/demu/issues/49) feat: CLI `--compose` and `--service` flags — merged [#56](https://github.com/automatedtomato/demu/pull/56)
