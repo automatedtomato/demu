@@ -393,10 +393,13 @@ mod tests {
         state.cwd = PathBuf::from("/app");
         let (cont, out) = dispatch_str(&mut state, "ls -l").expect("ls -l should succeed");
         assert!(cont);
-        // Directories get `d` prefix, files get `-` prefix in long format.
+        // /app contains only regular files (main.rs, lib.rs). In long format each line
+        // must start with `-` (file indicator). Verify at least one line starts with `-`
+        // so we know the type prefix is actually being emitted, not just present incidentally.
+        let has_file_prefix = out.lines().any(|l| l.starts_with('-'));
         assert!(
-            out.contains('d') || out.contains('-'),
-            "long format must include type prefix, got: {out}"
+            has_file_prefix,
+            "long format must emit lines starting with '-' for regular files, got: {out:?}"
         );
     }
 
