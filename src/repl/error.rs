@@ -46,7 +46,7 @@ pub enum ReplError {
 }
 
 /// Returns a closure that maps a [`std::io::Error`] into
-/// [`ReplError::InvalidArguments`] for the given command name.
+/// [`ReplError::Io`] for the given command name.
 ///
 /// This is a shared helper so that command handlers do not each have to
 /// define the same 3-line inline closure. Use it wherever a `writeln!` or

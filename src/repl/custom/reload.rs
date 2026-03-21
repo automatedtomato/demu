@@ -5,7 +5,7 @@
 // - File read errors   → write message to err_writer, preserve old state, return Ok(())
 // - Parse errors       → write message to err_writer, preserve old state, return Ok(())
 // - Engine errors      → write message to err_writer, preserve old state, return Ok(())
-// - I/O write errors   → return Err(ReplError::InvalidArguments)
+// - I/O write errors   → return Err(ReplError::Io)
 //
 // On success, warnings from the new state are emitted to `err_writer` before
 // the confirmation message is written to `writer`.

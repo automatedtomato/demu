@@ -23,7 +23,7 @@ use crate::repl::error::ReplError;
 /// message `"No history recorded."` is printed instead.
 ///
 /// All output goes to `writer`; I/O errors are mapped to
-/// [`ReplError::InvalidArguments`].
+/// [`ReplError::Io`].
 pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), ReplError> {
     // Map I/O errors into a ReplError so callers have a uniform error type.
     let io_err = |e: std::io::Error| ReplError::Io {
