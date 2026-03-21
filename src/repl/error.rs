@@ -33,6 +33,13 @@ pub enum ReplError {
     #[error("{command}: {message}")]
     InvalidArguments { command: String, message: String },
 
+    /// A write to the output sink failed (e.g. broken pipe).
+    ///
+    /// Semantically distinct from [`InvalidArguments`]: this variant covers
+    /// I/O failures on the terminal writer, not user input errors.
+    #[error("{command}: output error: {message}")]
+    Io { command: String, message: String },
+
     /// The input did not match any known command.
     #[error("unknown command: '{input}'. Type 'help' for available commands.")]
     UnknownCommand { input: String },
@@ -56,7 +63,7 @@ pub enum ReplError {
 /// `command` and has no lifetime dependency on the original `&str`.
 pub fn io_err_mapper(command: &str) -> impl Fn(std::io::Error) -> ReplError {
     let command = command.to_owned();
-    move |e| ReplError::InvalidArguments {
+    move |e| ReplError::Io {
         command: command.clone(),
         message: e.to_string(),
     }
@@ -155,20 +162,20 @@ mod tests {
 
     // --- io_err_mapper ---
 
-    /// `io_err_mapper` must produce `ReplError::InvalidArguments` with the
-    /// exact command name and the I/O error message string.
+    /// `io_err_mapper` must produce `ReplError::Io` (not InvalidArguments) with
+    /// the exact command name and the I/O error message string.
     #[test]
-    fn io_err_mapper_produces_invalid_arguments_with_command_name() {
+    fn io_err_mapper_produces_io_error_with_command_name() {
         let mapper = io_err_mapper("test-cmd");
         let raw_err = io::Error::new(io::ErrorKind::BrokenPipe, "broken pipe");
         let err = mapper(raw_err);
         assert_eq!(
             err,
-            ReplError::InvalidArguments {
+            ReplError::Io {
                 command: "test-cmd".to_string(),
                 message: "broken pipe".to_string(),
             },
-            "io_err_mapper must wrap the io::Error into InvalidArguments; got: {err:?}"
+            "io_err_mapper must wrap the io::Error into ReplError::Io; got: {err:?}"
         );
     }
 
@@ -180,14 +187,14 @@ mod tests {
         let e2 = mapper(io::Error::new(io::ErrorKind::Other, "second"));
         assert_eq!(
             e1,
-            ReplError::InvalidArguments {
+            ReplError::Io {
                 command: "multi".to_string(),
                 message: "first".to_string(),
             }
         );
         assert_eq!(
             e2,
-            ReplError::InvalidArguments {
+            ReplError::Io {
                 command: "multi".to_string(),
                 message: "second".to_string(),
             }
@@ -200,11 +207,40 @@ mod tests {
         let err = io_err_mapper(":reload")(io::Error::new(io::ErrorKind::Other, "oops"));
         assert_eq!(
             err,
-            ReplError::InvalidArguments {
+            ReplError::Io {
                 command: ":reload".to_string(),
                 message: "oops".to_string(),
             },
             "colon-prefixed command name must be preserved; got: {err:?}"
         );
+    }
+
+    // --- Io variant ---
+
+    #[test]
+    fn io_variant_display_contains_command_and_message() {
+        let err = ReplError::Io {
+            command: ":mounts".to_string(),
+            message: "broken pipe".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains(":mounts"), "must contain command; got: {msg}");
+        assert!(
+            msg.contains("broken pipe"),
+            "must contain message; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn io_variant_equality() {
+        let a = ReplError::Io {
+            command: "x".to_string(),
+            message: "y".to_string(),
+        };
+        let b = ReplError::Io {
+            command: "x".to_string(),
+            message: "y".to_string(),
+        };
+        assert_eq!(a, b);
     }
 }

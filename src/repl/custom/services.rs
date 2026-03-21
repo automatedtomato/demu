@@ -33,7 +33,7 @@ const GUARD_MSG: &str = "\
 /// When `ctx` is `None` the guard message is printed.
 /// When `ctx` is `Some`, a formatted service table is printed.
 pub fn execute(ctx: Option<&ComposeContext>, writer: &mut impl Write) -> Result<(), ReplError> {
-    let io_err = |e: std::io::Error| ReplError::InvalidArguments {
+    let io_err = |e: std::io::Error| ReplError::Io {
         command: ":services".to_string(),
         message: e.to_string(),
     };

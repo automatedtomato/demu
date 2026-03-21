@@ -31,7 +31,7 @@ const GUARD_MSG: &str = "\
 /// When `ctx` is `Some`, a dependency tree is rendered starting from
 /// `ctx.selected_service`.
 pub fn execute(ctx: Option<&ComposeContext>, writer: &mut impl Write) -> Result<(), ReplError> {
-    let io_err = |e: std::io::Error| ReplError::InvalidArguments {
+    let io_err = |e: std::io::Error| ReplError::Io {
         command: ":depends".to_string(),
         message: e.to_string(),
     };

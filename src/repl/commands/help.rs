@@ -44,7 +44,7 @@ CUSTOM COMMANDS (prefix with :)
 
 NOTE: demu is a preview shell. Commands show simulated state, not real containers.
 ";
-    write!(writer, "{help_text}").map_err(|e| ReplError::InvalidArguments {
+    write!(writer, "{help_text}").map_err(|e| ReplError::Io {
         command: "help".to_string(),
         message: e.to_string(),
     })
