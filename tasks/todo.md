@@ -1,13 +1,19 @@
 # demu — task tracking
 
-Post-v0.4.0 fixes complete. Planning next milestone.
+v0.4.0 released. Planning v0.5.0.
 
 ## In progress
 
-## Up next
+## Up next (v0.5.0 — ergonomics)
+
+- watch mode
+- shell completion
+- richer tree output
+- compact TUI mode
 
 ## Done
 
+- [x] **v0.4.0 released** — [Release](https://github.com/automatedtomato/demu/releases/tag/v0.4.0), [PR #71](https://github.com/automatedtomato/demu/pull/71)
 - [x] [#60](https://github.com/automatedtomato/demu/issues/60) security: path traversal in compose engine — merged [#67](https://github.com/automatedtomato/demu/pull/67)
 - [x] [#61](https://github.com/automatedtomato/demu/issues/61) fix: working_dir escape — merged [#67](https://github.com/automatedtomato/demu/pull/67)
 - [x] [#62](https://github.com/automatedtomato/demu/issues/62) fix: parse_env_file comments/quotes — merged [#67](https://github.com/automatedtomato/demu/pull/67)
@@ -15,9 +21,6 @@ Post-v0.4.0 fixes complete. Planning next milestone.
 - [x] [#64](https://github.com/automatedtomato/demu/issues/64) fix: :depends two-set DFS diamond deduplication — merged [#68](https://github.com/automatedtomato/demu/pull/68)
 - [x] [#65](https://github.com/automatedtomato/demu/issues/65) refactor: ReplError::Io variant — merged [#70](https://github.com/automatedtomato/demu/pull/70)
 - [x] [#66](https://github.com/automatedtomato/demu/issues/66) fix: --service without --compose warning — merged [#69](https://github.com/automatedtomato/demu/pull/69)
-
-## Done (v0.4.0 and earlier)
-
 - [x] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands (:services, :mounts, :depends) — merged [#59](https://github.com/automatedtomato/demu/pull/59)
 - [x] [#47](https://github.com/automatedtomato/demu/issues/47) feat: v0.4.0 Compose service preview [parent] — all child issues merged
 - [x] [#51](https://github.com/automatedtomato/demu/issues/51) feat: mount shadow model — merged [#58](https://github.com/automatedtomato/demu/pull/58)
