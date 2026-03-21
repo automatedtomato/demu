@@ -490,6 +490,39 @@ fn dockerfile_pipeline_unchanged_after_compose_addition() {
     );
 }
 
+// ── test 16: --service without --compose emits warning but still exits 0 ──────
+
+#[test]
+fn service_without_compose_emits_warning() {
+    // Passing --service without --compose should not abort, but should emit
+    // a clear warning to stderr so the user is not silently misled.
+    let dockerfile = temp_dockerfile("FROM scratch\n");
+
+    let output = demu()
+        .args([
+            "-f",
+            dockerfile.path().to_str().expect("path"),
+            "--service",
+            "api",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert!(
+        output.status.success(),
+        "--service without --compose must still exit 0; got: {:?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning"),
+        "--service without --compose must emit a warning to stderr; got: {stderr}"
+    );
+}
+
 // ── test 11 (original): empty Dockerfile (no instructions) exits 0 ───────────
 
 #[test]
