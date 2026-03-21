@@ -4,14 +4,14 @@ Milestone: [Release v0.4.0](https://github.com/automatedtomato/demu/milestone/4)
 Tracking issue: [#47](https://github.com/automatedtomato/demu/issues/47)
 
 ## In progress
-- [ ] [#50](https://github.com/automatedtomato/demu/issues/50) feat: Compose engine — service merge
+- [ ] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands
 
 ## Up next
-- [ ] [#51](https://github.com/automatedtomato/demu/issues/51) feat: mount shadow model
-- [ ] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands
 
 ## Done
 
+- [x] [#51](https://github.com/automatedtomato/demu/issues/51) feat: mount shadow model — merged [#58](https://github.com/automatedtomato/demu/pull/58)
+- [x] [#50](https://github.com/automatedtomato/demu/issues/50) feat: Compose engine — service merge — merged [#57](https://github.com/automatedtomato/demu/pull/57)
 - [x] [#49](https://github.com/automatedtomato/demu/issues/49) feat: CLI `--compose` and `--service` flags — merged [#56](https://github.com/automatedtomato/demu/pull/56)
 - [x] [#48](https://github.com/automatedtomato/demu/issues/48) feat: Compose YAML parser — merged [#53](https://github.com/automatedtomato/demu/pull/53)
 - [x] [#42](https://github.com/automatedtomato/demu/issues/42) feat: `COPY --from=<stage>` cross-stage file copying — merged [#45](https://github.com/automatedtomato/demu/pull/45)
