@@ -49,7 +49,7 @@ In Compose mode, optionally include service name:
 demu[api]:/{app}$ 
 ```
 
-## Supported shell commands (Issue #5 — implemented)
+## Supported shell commands (Issue #5 — implemented, Compose support added in v0.4.0)
 
 All commands operate on the preview state virtual filesystem and environment, not the host shell.
 
@@ -96,10 +96,13 @@ Examples:
 Show provenance and metadata for a path.
 
 ### `:mounts`
-Show visible mounts and shadowing behavior.
+Show visible mounts and shadowing behavior (Compose mode, v0.4.0).
 
 ### `:services`
-List Compose services in preview mode.
+List Compose services in preview mode (Compose mode, v0.4.0).
+
+### `:depends`
+Show the dependency tree for the current service, with diamond deduplication (Compose mode, v0.4.0).
 
 ### `:stage`
 Show or change the current stage where supported.

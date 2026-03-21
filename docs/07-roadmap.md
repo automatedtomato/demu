@@ -44,29 +44,31 @@ Includes:
 - `:explain <path>` (full provenance report)
 - `--stage <name>` CLI flag, preserved across `:reload`
 
-## v0.4 — Compose service preview
+## v0.4 — Compose service preview ✓ shipped
 
 Goal:
 Preview the world of a chosen service.
 
-Includes:
+Shipped with:
 
-- `--compose`
-- `--service`
-- `:services`
-- `:mounts`
-- env merge
-- mount shadow explanation
+- `--compose` and `--service` flags
+- `:services`, `:mounts`, `:depends` commands
+- Compose YAML parsing and service merge
+- volume mount shadows and environment inheritance
+- path traversal containment (security)
+- `working_dir` root escape guard (security)
+- `parse_env_file` comment and quote handling fixes
+- `:depends` diamond dependency deduplication
 
 ## v0.5 — ergonomics
 
-Possible additions:
+Planned additions:
 
-- watch mode
-- shell completion
-- richer tree output
-- compact TUI mode
-- fixture browser
+- watch mode (file monitoring and re-simulation)
+- shell completion (bash/zsh/fish)
+- richer tree output (visual hierarchy for deep filesystems)
+- compact TUI mode (alternative to line-based REPL)
+- fixture browser (CLI for exploring included test fixtures)
 
 ## Out-of-scope until much later
 

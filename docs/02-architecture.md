@@ -1,4 +1,4 @@
-> **Note (2026-03-17):** The CLI examples below (`demu exec`, `demu --compose`, `--service`) reflect the planned design and are not yet implemented. As of the v0.1.0 scaffold, `src/cli.rs` only accepts `-f/--file` and `--stage`. These flags will be added in later milestones.
+> **Note (2026-03-21):** As of v0.4.0, `--compose` and `--service` flags are fully implemented and tested. `demu exec` remains planned for v0.5 or later.
 
 # Architecture
 
@@ -66,7 +66,8 @@ Subareas:
 - Dockerfile instruction interpreter
 - `RUN` simulator
 - stage resolver
-- Compose merger
+- Compose service merger (v0.4.0+)
+- mount shadow model (v0.4.0+)
 
 ### `repl`
 
@@ -88,8 +89,9 @@ Custom commands:
 - `:history`
 - `:installed`
 - `:explain <path>`
-- `:mounts`
-- `:services`
+- `:mounts` (Compose mode, v0.4.0+)
+- `:services` (Compose mode, v0.4.0+)
+- `:depends` (Compose mode, v0.4.0+)
 - `:stage`
 
 ### `explain`
