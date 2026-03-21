@@ -49,6 +49,18 @@ pub fn execute(ctx: Option<&ComposeContext>, writer: &mut impl Write) -> Result<
     let services = &ctx.compose_file.services;
     let selected = &ctx.selected_service;
 
+    // #63: Warn if the selected service is not present in the service map.
+    // Without this check, `:services` would silently omit the `*` marker with
+    // no indication to the user that the selected service is unrecognized.
+    if !services.contains_key(selected.as_str()) {
+        let safe_selected = sanitize_for_terminal(selected);
+        writeln!(
+            writer,
+            "warning: selected service '{safe_selected}' not found in compose file"
+        )
+        .map_err(io_err)?;
+    }
+
     // Determine column width from the longest service name (min 8 chars).
     let name_width = services.keys().map(|k| k.len()).max().unwrap_or(0).max(8);
 
@@ -269,6 +281,34 @@ mod tests {
         assert!(
             out.contains("Services (2 total):"),
             "header missing; got: {out}"
+        );
+    }
+
+    // --- #63: selected service not in map emits warning ---
+
+    #[test]
+    fn selected_service_not_in_map_shows_warning() {
+        let db = Service {
+            image: Some("postgres:15".to_string()),
+            ..bare_service("db")
+        };
+        let ctx = ComposeContext {
+            compose_file: compose_with_services(vec![db]),
+            selected_service: "nonexistent".to_string(),
+        };
+        let out = run(Some(&ctx));
+        assert!(
+            out.contains("warning:"),
+            "must show warning when selected service is missing; got: {out}"
+        );
+        assert!(
+            out.contains("nonexistent"),
+            "warning must mention the missing service name; got: {out}"
+        );
+        // The service table must still be printed.
+        assert!(
+            out.contains("Services (1 total):"),
+            "table header must still appear; got: {out}"
         );
     }
 

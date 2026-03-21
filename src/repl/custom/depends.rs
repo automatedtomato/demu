@@ -7,8 +7,21 @@
 //     └─ db
 //     └─ redis
 //
-// Cycles are detected via a visited set. When a cycle is found, traversal
-// stops at that edge and a `[cycle detected]` marker is appended inline.
+// # Cycle detection
+// Cycles are detected via an `on_stack` visited set. When a node that is
+// already on the current DFS path is visited again, traversal stops at that
+// edge and a `[cycle detected]` marker is appended inline.
+//
+// # Diamond / shared dependency deduplication
+// A second `fully_visited` set tracks nodes whose subtrees have been fully
+// expanded in any branch. When a node is in `fully_visited`, the tree prints
+// `[shared, see above]` instead of re-expanding the subtree. This prevents
+// duplicate output for diamond dependency patterns.
+//
+// # Validation
+// If `ctx.selected_service` is not found in the service map, a warning line
+// is printed and the command returns without a tree — avoiding output that
+// looks like a valid (but wrong) leaf-service view.
 //
 // In single-Dockerfile mode (no ComposeContext), prints a clear usage hint.
 
@@ -47,18 +60,42 @@ pub fn execute(ctx: Option<&ComposeContext>, writer: &mut impl Write) -> Result<
     let root = &ctx.selected_service;
     let services = &ctx.compose_file.services;
 
-    // Print root service.
+    // #63: Validate that the selected service exists in the map. If not,
+    // output a clear warning rather than silently showing empty tree output
+    // that looks identical to a valid leaf service.
     let safe_root = sanitize_for_terminal(root);
+    if !services.contains_key(root.as_str()) {
+        writeln!(
+            writer,
+            "warning: service '{safe_root}' not found in compose file"
+        )
+        .map_err(io_err)?;
+        return Ok(());
+    }
+
+    // Print root service.
     writeln!(writer, "{safe_root}").map_err(io_err)?;
 
-    // DFS traversal with a visited set to detect cycles.
-    let mut visited: HashSet<String> = HashSet::new();
-    visited.insert(root.clone());
+    // #64: Two-set DFS:
+    // - `on_stack`: nodes on the current path from root → cycle detection.
+    // - `fully_visited`: nodes whose subtrees have been fully expanded in any
+    //   prior branch → print `[shared, see above]` instead of re-expanding.
+    let mut on_stack: HashSet<String> = HashSet::new();
+    let mut fully_visited: HashSet<String> = HashSet::new();
+    on_stack.insert(root.clone());
 
     // Collect immediate dependencies of root, in original order.
-    if let Some(svc) = services.get(root) {
+    if let Some(svc) = services.get(root.as_str()) {
         for dep in &svc.depends_on {
-            print_dep_tree(dep, services, &mut visited, 1, writer, &io_err)?;
+            print_dep_tree(
+                dep,
+                services,
+                &mut on_stack,
+                &mut fully_visited,
+                1,
+                writer,
+                &io_err,
+            )?;
         }
     }
 
@@ -68,11 +105,15 @@ pub fn execute(ctx: Option<&ComposeContext>, writer: &mut impl Write) -> Result<
 /// Recursively print one level of the dependency tree.
 ///
 /// `depth` controls the indentation level (1 = first level of children).
-/// `visited` carries the path from the root to detect cycles.
+/// `on_stack` contains nodes on the current DFS path (cycle detection).
+/// `fully_visited` contains nodes whose subtrees were already fully printed
+/// in a prior branch; these are shown as `[shared, see above]` instead of
+/// being re-expanded.
 fn print_dep_tree(
     name: &str,
     services: &std::collections::BTreeMap<String, crate::model::compose::Service>,
-    visited: &mut HashSet<String>,
+    on_stack: &mut HashSet<String>,
+    fully_visited: &mut HashSet<String>,
     depth: usize,
     writer: &mut impl Write,
     io_err: &impl Fn(std::io::Error) -> ReplError,
@@ -80,26 +121,41 @@ fn print_dep_tree(
     let indent = "  ".repeat(depth);
     let safe_name = sanitize_for_terminal(name);
 
-    if visited.contains(name) {
-        // Cycle detected — print the name with a marker, do not recurse.
+    if on_stack.contains(name) {
+        // Cycle detected — this node is already on the current path.
         writeln!(writer, "{indent}└─ {safe_name}  [cycle detected]").map_err(io_err)?;
+        return Ok(());
+    }
+
+    if fully_visited.contains(name) {
+        // Already fully expanded in a prior branch — avoid duplicate subtrees.
+        writeln!(writer, "{indent}└─ {safe_name}  [shared, see above]").map_err(io_err)?;
         return Ok(());
     }
 
     writeln!(writer, "{indent}└─ {safe_name}").map_err(io_err)?;
 
-    // Mark as visited for the sub-tree.
-    visited.insert(name.to_string());
+    // Mark on the current path and recurse into dependencies.
+    on_stack.insert(name.to_string());
 
-    // Recurse into this service's own dependencies.
     if let Some(svc) = services.get(name) {
         for dep in &svc.depends_on {
-            print_dep_tree(dep, services, visited, depth + 1, writer, io_err)?;
+            print_dep_tree(
+                dep,
+                services,
+                on_stack,
+                fully_visited,
+                depth + 1,
+                writer,
+                io_err,
+            )?;
         }
     }
 
-    // Unmark when returning (allow the same service to appear in separate branches).
-    visited.remove(name);
+    // Remove from current path on backtrack, then mark as fully visited so
+    // future branches that reach this node show `[shared, see above]`.
+    on_stack.remove(name);
+    fully_visited.insert(name.to_string());
 
     Ok(())
 }
@@ -280,8 +336,10 @@ mod tests {
     // --- same service appears in multiple branches (diamond pattern) ---
 
     #[test]
-    fn diamond_dependency_not_false_cycle() {
-        // api → db AND api → cache; both → shared (diamond, not a cycle)
+    fn diamond_dependency_shows_shared_see_above() {
+        // api → db AND api → cache; both → shared (diamond, not a cycle).
+        // With the two-set DFS: shared appears fully under db (whichever comes
+        // first alphabetically), then as `[shared, see above]` under cache.
         let shared = bare_service("shared");
         let db = Service {
             depends_on: vec!["shared".to_string()],
@@ -303,15 +361,46 @@ mod tests {
             selected_service: "api".to_string(),
         };
         let out = run(Some(&ctx));
-        // shared should appear twice (once under db, once under cache) — NOT flagged as cycle
-        let shared_count = out.matches("└─ shared").count();
-        assert_eq!(
-            shared_count, 2,
-            "shared should appear twice in diamond; got:\n{out}"
-        );
+        // No cycle must be reported.
         assert!(
             !out.contains("[cycle detected]"),
             "diamond pattern must not trigger cycle detection; got:\n{out}"
+        );
+        // shared must appear exactly once as a normal entry and once as [shared, see above].
+        let full_count = out.matches("└─ shared").count();
+        let shared_above = out.contains("[shared, see above]");
+        assert_eq!(
+            full_count, 2,
+            "shared must appear twice total (once full, once marker); got:\n{out}"
+        );
+        assert!(
+            shared_above,
+            "second occurrence of shared must show '[shared, see above]'; got:\n{out}"
+        );
+    }
+
+    // --- #63: selected_service not in map ---
+
+    #[test]
+    fn selected_service_not_in_map_shows_warning() {
+        let db = bare_service("db");
+        let ctx = ComposeContext {
+            compose_file: compose_with_services(vec![db]),
+            selected_service: "typo_service".to_string(),
+        };
+        let out = run(Some(&ctx));
+        assert!(
+            out.contains("warning:"),
+            "must show a warning when selected service is not found; got: {out}"
+        );
+        assert!(
+            out.contains("typo_service"),
+            "warning must mention the missing service name; got: {out}"
+        );
+        // Must NOT show a bare root line that looks like a valid leaf.
+        assert!(
+            !out.trim().eq("typo_service"),
+            "must not output bare name as if it were a valid leaf; got: {out}"
         );
     }
 
