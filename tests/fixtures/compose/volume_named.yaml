@@ -1,0 +1,10 @@
+# Fixture exercising a named volume mount and the corresponding top-level
+# volume declaration.
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

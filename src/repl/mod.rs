@@ -26,8 +26,8 @@ use rustyline::DefaultEditor;
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
 use crate::repl::commands::{apt, cat, cd, env_cmd, find, help, ls, pip, pwd, which};
-use crate::repl::config::ReplConfig;
-use crate::repl::custom::{explain, history, installed, layers, reload};
+use crate::repl::config::{ComposeContext, ReplConfig};
+use crate::repl::custom::{depends, explain, history, installed, layers, mounts, reload, services};
 use crate::repl::error::ReplError;
 use crate::repl::parse::{parse_input, ParsedCommand};
 
@@ -76,7 +76,7 @@ pub fn run_repl(state: &mut PreviewState, config: &ReplConfig) -> anyhow::Result
                     continue;
                 }
 
-                match dispatch(state, cmd, &mut out) {
+                match dispatch(state, cmd, config.compose_context.as_ref(), &mut out) {
                     // `exit` / `quit` — terminate the loop cleanly.
                     Ok(false) => break,
                     Ok(true) => {}
@@ -116,6 +116,11 @@ pub fn run_repl(state: &mut PreviewState, config: &ReplConfig) -> anyhow::Result
 /// All handlers write their output to `writer` rather than to stdout, which
 /// makes this function fully testable without capturing stdout.
 ///
+/// `compose_ctx` is `Some` when the REPL session was started in Compose mode
+/// (`--compose`). Compose-mode commands (`:services`, `:mounts`, `:depends`)
+/// use this to access the parsed Compose file and selected service. When
+/// `compose_ctx` is `None`, those commands print a usage hint.
+///
 /// Returns `Ok(true)` normally or `Ok(false)` when the command signals exit.
 /// The caller is responsible for exiting the loop on `Exit`.
 ///
@@ -126,6 +131,7 @@ pub fn run_repl(state: &mut PreviewState, config: &ReplConfig) -> anyhow::Result
 pub fn dispatch(
     state: &mut PreviewState,
     cmd: ParsedCommand,
+    compose_ctx: Option<&ComposeContext>,
     writer: &mut impl Write,
 ) -> Result<bool, ReplError> {
     match cmd {
@@ -170,6 +176,15 @@ pub fn dispatch(
         }
         ParsedCommand::Explain { path } => {
             explain::execute(state, &path, writer)?;
+        }
+        ParsedCommand::Mounts => {
+            mounts::execute(state, compose_ctx, writer)?;
+        }
+        ParsedCommand::Services => {
+            services::execute(compose_ctx, writer)?;
+        }
+        ParsedCommand::Depends => {
+            depends::execute(compose_ctx, writer)?;
         }
         ParsedCommand::Exit => {
             return Ok(false);
@@ -221,7 +236,10 @@ mod tests {
     fn dispatch_str(state: &mut PreviewState, input: &str) -> Result<(bool, String), ReplError> {
         let cmd = parse_input(input);
         let mut buf = Vec::new();
-        let cont = dispatch(state, cmd, &mut buf)?;
+        // Pass None for compose_ctx — all standard REPL tests operate in
+        // single-Dockerfile mode. Compose-mode command tests live in
+        // the respective custom module test suites.
+        let cont = dispatch(state, cmd, None, &mut buf)?;
         Ok((cont, String::from_utf8(buf).expect("utf-8")))
     }
 
@@ -323,7 +341,7 @@ mod tests {
         let mut state = PreviewState::default();
         let cmd = ParsedCommand::Exit;
         let mut buf = Vec::new();
-        let cont = dispatch(&mut state, cmd, &mut buf).expect("should succeed");
+        let cont = dispatch(&mut state, cmd, None, &mut buf).expect("should succeed");
         assert!(!cont, "exit must return false to signal loop termination");
     }
 
@@ -375,10 +393,13 @@ mod tests {
         state.cwd = PathBuf::from("/app");
         let (cont, out) = dispatch_str(&mut state, "ls -l").expect("ls -l should succeed");
         assert!(cont);
-        // Directories get `d` prefix, files get `-` prefix in long format.
+        // /app contains only regular files (main.rs, lib.rs). In long format each line
+        // must start with `-` (file indicator). Verify at least one line starts with `-`
+        // so we know the type prefix is actually being emitted, not just present incidentally.
+        let has_file_prefix = out.lines().any(|l| l.starts_with('-'));
         assert!(
-            out.contains('d') || out.contains('-'),
-            "long format must include type prefix, got: {out}"
+            has_file_prefix,
+            "long format must emit lines starting with '-' for regular files, got: {out:?}"
         );
     }
 

@@ -36,7 +36,7 @@ pub fn execute(state: &PreviewState, path: &str, writer: &mut impl Write) -> Res
             // Use lossy conversion so non-UTF-8 bytes are displayed as U+FFFD
             // rather than causing a panic or hard error.
             let content = String::from_utf8_lossy(&f.content);
-            write!(writer, "{content}").map_err(|e| ReplError::InvalidArguments {
+            write!(writer, "{content}").map_err(|e| ReplError::Io {
                 command: "cat".to_string(),
                 message: e.to_string(),
             })
@@ -54,11 +54,9 @@ pub fn execute(state: &PreviewState, path: &str, writer: &mut impl Write) -> Res
             } else {
                 " (symlink, follow manually)"
             };
-            writeln!(writer, "-> {}{note}", s.target.display()).map_err(|e| {
-                ReplError::InvalidArguments {
-                    command: "cat".to_string(),
-                    message: e.to_string(),
-                }
+            writeln!(writer, "-> {}{note}", s.target.display()).map_err(|e| ReplError::Io {
+                command: "cat".to_string(),
+                message: e.to_string(),
             })
         }
         None => Err(ReplError::PathNotFound { path: resolved }),

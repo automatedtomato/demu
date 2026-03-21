@@ -62,7 +62,7 @@ pub fn execute(
             .and_then(|n| n.to_str())
             .unwrap_or("?");
 
-        format_entry(name, node, long, writer).map_err(|e| ReplError::InvalidArguments {
+        format_entry(name, node, long, writer).map_err(|e| ReplError::Io {
             command: "ls".to_string(),
             message: e.to_string(),
         })?;

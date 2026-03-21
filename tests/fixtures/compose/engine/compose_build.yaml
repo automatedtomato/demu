@@ -1,0 +1,9 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - SHARED=from_compose
+      - COMPOSE_VAR=from_compose
+    working_dir: /override

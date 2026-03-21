@@ -27,6 +27,23 @@ fn temp_dockerfile(content: &str) -> tempfile::NamedTempFile {
     f
 }
 
+/// Create a temporary Compose YAML file containing `content` and return its path.
+///
+/// The returned `tempfile::NamedTempFile` keeps the file alive for the
+/// duration of the test — do not drop it before `Command::status()` returns.
+fn temp_compose_file(content: &str) -> tempfile::NamedTempFile {
+    let mut f = tempfile::NamedTempFile::new().expect("tempfile");
+    f.write_all(content.as_bytes()).expect("write compose file");
+    f
+}
+
+/// Minimal valid compose YAML with an "api" service.
+const COMPOSE_WITH_API: &str = "services:\n  api:\n    image: myapp:latest\n";
+
+/// Compose YAML with two services for service-list testing.
+const COMPOSE_WITH_API_AND_DB: &str =
+    "services:\n  api:\n    image: myapp:latest\n  db:\n    image: postgres:15\n";
+
 // ── test 1: missing --file flag exits non-zero ────────────────────────────────
 
 #[test]
@@ -235,8 +252,8 @@ fn malformed_dockerfile_exits_one() {
         "parse error must begin with 'demu:' prefix, got: {stderr}"
     );
     assert!(
-        stderr.contains("parse") || stderr.contains("failed"),
-        "parse error must mention parse failure, got: {stderr}"
+        stderr.contains("parse"),
+        "parse error must mention 'parse', got: {stderr}"
     );
 }
 
@@ -311,7 +328,235 @@ fn stage_flag_exits_one_with_not_implemented_error() {
     );
 }
 
-// ── test 11: empty Dockerfile (no instructions) exits 0 ──────────────────────
+// ── test 10b: --stage <valid-name> selects correct stage ─────────────────────
+
+#[test]
+fn valid_stage_name_exits_zero() {
+    // A two-stage Dockerfile with a named builder stage. Passing --stage builder
+    // should select the builder stage and exit 0 with EOF stdin.
+    let df = temp_dockerfile(
+        "FROM ubuntu:22.04 AS builder\nWORKDIR /build\nRUN echo done\nFROM scratch\nCOPY --from=builder /build /out\n",
+    );
+    let output = demu()
+        .args([
+            "-f",
+            df.path().to_str().expect("path"),
+            "--stage",
+            "builder",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "--stage builder on valid two-stage Dockerfile must exit 0, got: {:?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// ── Compose mode tests ────────────────────────────────────────────────────────
+
+// ── test 11: --compose without --service exits 1 with clear error ─────────────
+
+#[test]
+fn compose_without_service_flag_exits_one() {
+    // `--compose` requires `--service`. Missing `--service` must exit 1 with
+    // a message that names the missing flag so the user knows how to fix it.
+    let compose = temp_compose_file(COMPOSE_WITH_API);
+
+    let output = demu()
+        .args(["--compose", "-f", compose.path().to_str().expect("path")])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "--compose without --service must exit 1, got: {:?}",
+        output.status
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--service") || stderr.contains("service"),
+        "error must mention '--service', got: {stderr}"
+    );
+    assert!(
+        stderr.contains("required") || stderr.contains("compose mode"),
+        "error must say 'required' or 'compose mode', got: {stderr}"
+    );
+}
+
+// ── test 12: --compose with nonexistent service exits 1 and lists services ────
+
+#[test]
+fn compose_nonexistent_service_exits_one_with_available_list() {
+    // When `--service` names a service that does not exist in the Compose file,
+    // `demu` must exit 1 and list the available service names so the user knows
+    // what to pass.
+    let compose = temp_compose_file(COMPOSE_WITH_API_AND_DB);
+
+    let output = demu()
+        .args([
+            "--compose",
+            "-f",
+            compose.path().to_str().expect("path"),
+            "--service",
+            "nonexistent",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "--compose with nonexistent service must exit 1, got: {:?}",
+        output.status
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not found"),
+        "error must say 'not found', got: {stderr}"
+    );
+    // Both service names from the compose file must appear so the user can pick.
+    assert!(
+        stderr.contains("api"),
+        "error must list available service 'api', got: {stderr}"
+    );
+    assert!(
+        stderr.contains("db"),
+        "error must list available service 'db', got: {stderr}"
+    );
+}
+
+// ── test 13: --compose with invalid YAML exits 1 with parse error ─────────────
+
+#[test]
+fn compose_invalid_yaml_exits_one() {
+    // A file that is not valid YAML must cause `demu` to exit 1 with a message
+    // that begins with `"demu:"` and references the parse failure.
+    let compose = temp_compose_file("{ not: valid: yaml: [\n");
+
+    let output = demu()
+        .args([
+            "--compose",
+            "-f",
+            compose.path().to_str().expect("path"),
+            "--service",
+            "api",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "invalid YAML in compose mode must exit 1, got: {:?}",
+        output.status
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("demu:"),
+        "error must begin with 'demu:', got: {stderr}"
+    );
+}
+
+// ── test 14: valid --compose + --service exits 0 with EOF stdin ───────────────
+
+#[test]
+fn compose_valid_service_with_eof_stdin_exits_zero() {
+    // The happy path: a valid Compose file and a known service name. With stdin
+    // closed immediately, the REPL hits EOF and exits cleanly.
+    let compose = temp_compose_file(COMPOSE_WITH_API);
+
+    let output = demu()
+        .args([
+            "--compose",
+            "-f",
+            compose.path().to_str().expect("path"),
+            "--service",
+            "api",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert!(
+        output.status.success(),
+        "--compose with valid service + EOF stdin must exit 0, got: {:?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// ── test 15: Dockerfile pipeline unchanged in compose mode addition ───────────
+
+#[test]
+fn dockerfile_pipeline_unchanged_after_compose_addition() {
+    // Regression guard: `demu -f Dockerfile` must still work exactly as before.
+    // This ensures the compose branch does not accidentally break the existing flow.
+    let dockerfile = temp_dockerfile("FROM scratch\n");
+
+    let output = demu()
+        .args(["-f", dockerfile.path().to_str().expect("path")])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert!(
+        output.status.success(),
+        "existing Dockerfile pipeline must still exit 0, got: {:?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// ── test 16: --service without --compose emits warning but still exits 0 ──────
+
+#[test]
+fn service_without_compose_emits_warning() {
+    // Passing --service without --compose should not abort, but should emit
+    // a clear warning to stderr so the user is not silently misled.
+    let dockerfile = temp_dockerfile("FROM scratch\n");
+
+    let output = demu()
+        .args([
+            "-f",
+            dockerfile.path().to_str().expect("path"),
+            "--service",
+            "api",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert!(
+        output.status.success(),
+        "--service without --compose must still exit 0; got: {:?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--service"),
+        "--service without --compose must mention '--service' in the warning; got: {stderr}"
+    );
+    assert!(
+        stderr.contains("warning"),
+        "--service without --compose must be prefixed with 'warning'; got: {stderr}"
+    );
+}
+
+// ── test 11 (original): empty Dockerfile (no instructions) exits 0 ───────────
 
 #[test]
 fn empty_dockerfile_with_eof_stdin_exits_zero() {

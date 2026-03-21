@@ -64,7 +64,7 @@ pub fn execute(
     matches.sort();
 
     for m in &matches {
-        writeln!(writer, "{m}").map_err(|e| ReplError::InvalidArguments {
+        writeln!(writer, "{m}").map_err(|e| ReplError::Io {
             command: "find".to_string(),
             message: e.to_string(),
         })?;

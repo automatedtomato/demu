@@ -1,12 +1,12 @@
 # demu
 
-`demu` is a fast preview shell for Dockerfiles.
+`demu` is a fast preview shell for Dockerfiles and Docker Compose files.
 
 It lets you inspect the **filesystem, environment variables, and instruction history** a Dockerfile is trying to create — **without building or running a container**.
 
 ## Why
 
-When you are editing a `Dockerfile`, you often just want to answer questions like:
+When you are editing a `Dockerfile` or `compose.yaml`, you often just want to answer questions like:
 
 - What files would be visible?
 - What is the working directory?
@@ -14,6 +14,7 @@ When you are editing a `Dockerfile`, you often just want to answer questions lik
 - Did this `COPY` land where I think it did?
 - What did each instruction actually do?
 - Where did this file come from — a `COPY`, a `RUN`, or a previous stage?
+- What services are in this Compose file and what do they depend on?
 
 `demu` is for that fast feedback loop.
 
@@ -25,8 +26,8 @@ Download the latest release for your platform from the [Releases page](https://g
 
 ```bash
 # Linux / macOS — extract and move to PATH
-tar xzf demu-0.3.0-x86_64-unknown-linux-gnu.tar.gz
-sudo mv demu-0.3.0-x86_64-unknown-linux-gnu/demu /usr/local/bin/
+tar xzf demu-0.4.0-x86_64-unknown-linux-gnu.tar.gz
+sudo mv demu-0.4.0-x86_64-unknown-linux-gnu/demu /usr/local/bin/
 ```
 
 Available targets:
@@ -49,6 +50,8 @@ cargo install --path .
 
 ## Usage
 
+### Dockerfile mode
+
 ```bash
 demu -f Dockerfile
 ```
@@ -61,6 +64,14 @@ For multi-stage Dockerfiles, use `--stage` to inspect a specific stage:
 demu -f Dockerfile --stage builder
 demu -f Dockerfile --stage 0   # by numeric index
 ```
+
+### Compose mode
+
+```bash
+demu --compose compose.yaml --service api
+```
+
+This merges the selected service's configuration, simulates its Dockerfile, applies `working_dir`, `environment`, `env_file`, and volume mount shadows, then drops you into the same preview shell — now reflecting the service's effective state.
 
 ### Shell commands
 
@@ -85,6 +96,9 @@ demu -f Dockerfile --stage 0   # by numeric index
 | `:installed` | List all simulated package installs by manager |
 | `:explain <path>` | Show where a file came from (provenance) |
 | `:reload` | Re-read and re-simulate the Dockerfile in place |
+| `:services` | List all services in the Compose file (Compose mode) |
+| `:mounts` | Show volume mount shadows for the selected service (Compose mode) |
+| `:depends` | Show the dependency tree for the selected service (Compose mode) |
 | `which <cmd>` | Check whether a command appears to be installed |
 | `apt list --installed` | apt-style installed package listing |
 | `pip list` | pip-style installed package listing |
@@ -93,8 +107,10 @@ demu -f Dockerfile --stage 0   # by numeric index
 
 | Flag | Description |
 |------|-------------|
-| `-f <path>` | Path to the Dockerfile (required) |
+| `-f <path>` | Path to the Dockerfile (required in Dockerfile mode) |
 | `--stage <name>` | Inspect a specific stage (name or numeric index) |
+| `--compose <path>` | Path to a Compose file (enables Compose mode) |
+| `--service <name>` | Service to inspect (required with `--compose`) |
 | `--version` | Print version |
 | `--help` | Print help |
 
@@ -132,7 +148,7 @@ It prefers **fast, safe previews** over perfect fidelity. Simulated behavior is 
 
 ## Status
 
-**v0.3.0** — Multi-stage build support.
+**v0.4.0** — Docker Compose service preview.
 
 | Feature | Status |
 |---------|--------|
@@ -147,7 +163,11 @@ It prefers **fast, safe previews** over perfect fidelity. Simulated behavior is 
 | `:installed`, `which`, `:reload` | Working |
 | `apt list --installed`, `pip list` | Working |
 | Skipped-command warnings with reason | Working |
-| Compose support | Planned for v0.4 |
+| Compose YAML parsing | Working |
+| Compose service preview (`--compose`, `--service`) | Working |
+| Compose `:services`, `:mounts`, `:depends` | Working |
+| Volume mount shadows | Working |
+| Path traversal containment (build.context/dockerfile) | Working |
 
 See the [roadmap](./docs/07-roadmap.md) for the full plan.
 
@@ -173,5 +193,6 @@ docker compose -f docker-compose.dev.yml run --rm dev bash
 - [CLI and REPL](./docs/03-cli-and-repl.md)
 - [Dockerfile Semantics](./docs/04-dockerfile-semantics.md)
 - [RUN Simulation](./docs/05-run-simulation.md)
+- [Compose Plan](./docs/06-compose-plan.md)
 - [Roadmap](./docs/07-roadmap.md)
 - [Test Strategy](./docs/08-test-strategy.md)

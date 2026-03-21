@@ -1,0 +1,9 @@
+# Fixture exercising the dict form of `environment` including a numeric value
+# that must be coerced to a string by the parser.
+services:
+  api:
+    image: node:20
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DEBUG: "false"

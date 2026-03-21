@@ -1,7 +1,6 @@
 # demu — task tracking
 
-Milestone: [Release v0.3.0](https://github.com/automatedtomato/demu/milestone/3)
-Tracking issue: [#39](https://github.com/automatedtomato/demu/issues/39)
+Post-v0.4.0 fixes complete. Planning next milestone.
 
 ## In progress
 
@@ -9,6 +8,22 @@ Tracking issue: [#39](https://github.com/automatedtomato/demu/issues/39)
 
 ## Done
 
+- [x] [#60](https://github.com/automatedtomato/demu/issues/60) security: path traversal in compose engine — merged [#67](https://github.com/automatedtomato/demu/pull/67)
+- [x] [#61](https://github.com/automatedtomato/demu/issues/61) fix: working_dir escape — merged [#67](https://github.com/automatedtomato/demu/pull/67)
+- [x] [#62](https://github.com/automatedtomato/demu/issues/62) fix: parse_env_file comments/quotes — merged [#67](https://github.com/automatedtomato/demu/pull/67)
+- [x] [#63](https://github.com/automatedtomato/demu/issues/63) fix: :depends/:services invalid service warning — merged [#68](https://github.com/automatedtomato/demu/pull/68)
+- [x] [#64](https://github.com/automatedtomato/demu/issues/64) fix: :depends two-set DFS diamond deduplication — merged [#68](https://github.com/automatedtomato/demu/pull/68)
+- [x] [#65](https://github.com/automatedtomato/demu/issues/65) refactor: ReplError::Io variant — merged [#70](https://github.com/automatedtomato/demu/pull/70)
+- [x] [#66](https://github.com/automatedtomato/demu/issues/66) fix: --service without --compose warning — merged [#69](https://github.com/automatedtomato/demu/pull/69)
+
+## Done (v0.4.0 and earlier)
+
+- [x] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands (:services, :mounts, :depends) — merged [#59](https://github.com/automatedtomato/demu/pull/59)
+- [x] [#47](https://github.com/automatedtomato/demu/issues/47) feat: v0.4.0 Compose service preview [parent] — all child issues merged
+- [x] [#51](https://github.com/automatedtomato/demu/issues/51) feat: mount shadow model — merged [#58](https://github.com/automatedtomato/demu/pull/58)
+- [x] [#50](https://github.com/automatedtomato/demu/issues/50) feat: Compose engine — service merge — merged [#57](https://github.com/automatedtomato/demu/pull/57)
+- [x] [#49](https://github.com/automatedtomato/demu/issues/49) feat: CLI `--compose` and `--service` flags — merged [#56](https://github.com/automatedtomato/demu/pull/56)
+- [x] [#48](https://github.com/automatedtomato/demu/issues/48) feat: Compose YAML parser — merged [#53](https://github.com/automatedtomato/demu/pull/53)
 - [x] [#42](https://github.com/automatedtomato/demu/issues/42) feat: `COPY --from=<stage>` cross-stage file copying — merged [#45](https://github.com/automatedtomato/demu/pull/45)
 - [x] [#41](https://github.com/automatedtomato/demu/issues/41) feat: multi-stage build support + `--stage` CLI flag — merged [#44](https://github.com/automatedtomato/demu/pull/44)
 - [x] [#40](https://github.com/automatedtomato/demu/issues/40) feat: `:explain <path>` REPL command

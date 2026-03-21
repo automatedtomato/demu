@@ -7,8 +7,11 @@
 // `reload` is the only handler here that mutates `PreviewState`; all others
 // are pure read commands.
 
+pub mod depends;
 pub mod explain;
 pub mod history;
 pub mod installed;
 pub mod layers;
+pub mod mounts;
 pub mod reload;
+pub mod services;

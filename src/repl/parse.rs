@@ -63,6 +63,12 @@ pub enum ParsedCommand {
     },
     /// `:reload` — re-read and re-process the Dockerfile.
     Reload,
+    /// `:mounts` — list all volume mount shadows applied by the Compose engine.
+    Mounts,
+    /// `:services` — list all services in the Compose file (Compose mode only).
+    Services,
+    /// `:depends` — render the dependency tree for the selected service (Compose mode only).
+    Depends,
     /// The input was empty or only whitespace.
     Empty,
     /// The input did not match any known command.
@@ -110,6 +116,9 @@ pub fn parse_input(line: &str) -> ParsedCommand {
         ":history" => ParsedCommand::History,
         ":installed" => ParsedCommand::Installed,
         ":reload" => ParsedCommand::Reload,
+        ":mounts" => ParsedCommand::Mounts,
+        ":services" => ParsedCommand::Services,
+        ":depends" => ParsedCommand::Depends,
         _ => ParsedCommand::Unknown {
             input: trimmed.to_string(),
         },
@@ -812,6 +821,73 @@ mod tests {
             parse_input("WHICH curl"),
             ParsedCommand::Unknown {
                 input: "WHICH curl".to_string()
+            }
+        );
+    }
+
+    // --- :services ---
+
+    #[test]
+    fn services_bare_returns_services() {
+        assert_eq!(parse_input(":services"), ParsedCommand::Services);
+    }
+
+    #[test]
+    fn services_with_trailing_whitespace_returns_services() {
+        assert_eq!(parse_input(":services  "), ParsedCommand::Services);
+    }
+
+    #[test]
+    fn services_uppercase_is_unknown() {
+        assert_eq!(
+            parse_input(":SERVICES"),
+            ParsedCommand::Unknown {
+                input: ":SERVICES".to_string()
+            }
+        );
+    }
+
+    // --- :depends ---
+
+    #[test]
+    fn depends_bare_returns_depends() {
+        assert_eq!(parse_input(":depends"), ParsedCommand::Depends);
+    }
+
+    #[test]
+    fn depends_with_trailing_whitespace_returns_depends() {
+        assert_eq!(parse_input(":depends  "), ParsedCommand::Depends);
+    }
+
+    #[test]
+    fn depends_uppercase_is_unknown() {
+        assert_eq!(
+            parse_input(":DEPENDS"),
+            ParsedCommand::Unknown {
+                input: ":DEPENDS".to_string()
+            }
+        );
+    }
+
+    // --- :mounts ---
+
+    #[test]
+    fn mounts_bare_returns_mounts() {
+        assert_eq!(parse_input(":mounts"), ParsedCommand::Mounts);
+    }
+
+    #[test]
+    fn mounts_with_trailing_whitespace_returns_mounts() {
+        assert_eq!(parse_input(":mounts  "), ParsedCommand::Mounts);
+    }
+
+    #[test]
+    fn mounts_uppercase_is_unknown() {
+        // Custom commands are case-sensitive — :MOUNTS is not :mounts.
+        assert_eq!(
+            parse_input(":MOUNTS"),
+            ParsedCommand::Unknown {
+                input: ":MOUNTS".to_string()
             }
         );
     }
