@@ -8,24 +8,39 @@
 //     /data           bind mount from ./data  [rw]
 //     /root/.npm      named volume: npm-cache  [ro]
 //
-// When no mounts have been recorded (e.g. in plain Dockerfile mode or when the
-// Compose service declares no volumes), a brief sentinel line is printed.
+// In single-Dockerfile mode (no ComposeContext), prints a clear usage hint.
 
 use std::io::Write;
 
 use crate::model::state::PreviewState;
 use crate::output::sanitize::sanitize_for_terminal;
+use crate::repl::config::ComposeContext;
 use crate::repl::error::ReplError;
+
+/// Guard message printed when `:mounts` is invoked outside Compose mode.
+const GUARD_MSG: &str = "\
+:mounts is only available in compose mode
+  Usage: demu --compose -f compose.yaml --service <name>
+";
 
 /// Execute the `:mounts` command.
 ///
-/// Writes a formatted list of all volume mount shadows to `writer`.
-/// When `state.mounts` is empty, prints `"No mount shadows recorded."`.
-pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), ReplError> {
+/// When `compose_ctx` is `None` the guard message is printed.
+/// Otherwise, writes a formatted list of all volume mount shadows to `writer`.
+pub fn execute(
+    state: &PreviewState,
+    compose_ctx: Option<&ComposeContext>,
+    writer: &mut impl Write,
+) -> Result<(), ReplError> {
     let io_err = |e: std::io::Error| ReplError::InvalidArguments {
         command: ":mounts".to_string(),
         message: e.to_string(),
     };
+
+    if compose_ctx.is_none() {
+        write!(writer, "{GUARD_MSG}").map_err(io_err)?;
+        return Ok(());
+    }
 
     if state.mounts.is_empty() {
         writeln!(writer, "No mount shadows recorded.").map_err(io_err)?;
@@ -50,22 +65,48 @@ pub fn execute(state: &PreviewState, writer: &mut impl Write) -> Result<(), Repl
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::model::compose::ComposeFile;
     use crate::model::provenance::MountInfo;
     use crate::model::state::PreviewState;
+    use crate::repl::config::ComposeContext;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    fn run(state: &PreviewState) -> String {
+    fn dummy_ctx() -> ComposeContext {
+        ComposeContext {
+            compose_file: ComposeFile {
+                services: BTreeMap::new(),
+                volumes: BTreeMap::new(),
+            },
+            selected_service: "svc".to_string(),
+        }
+    }
+
+    fn run(state: &PreviewState, ctx: Option<&ComposeContext>) -> String {
         let mut buf = Vec::new();
-        execute(state, &mut buf).expect("mounts should not fail");
+        execute(state, ctx, &mut buf).expect("mounts should not fail");
         String::from_utf8(buf).expect("utf-8")
+    }
+
+    // --- guard mode ---
+
+    #[test]
+    fn no_context_prints_guard_message() {
+        let state = PreviewState::default();
+        let out = run(&state, None);
+        assert!(
+            out.contains(":mounts is only available in compose mode"),
+            "guard message missing; got: {out}"
+        );
     }
 
     // --- empty state ---
 
     #[test]
     fn empty_mounts_prints_sentinel() {
+        let ctx = dummy_ctx();
         let state = PreviewState::default();
-        let out = run(&state);
+        let out = run(&state, Some(&ctx));
         assert_eq!(out.trim(), "No mount shadows recorded.", "got: {out}");
     }
 
@@ -79,7 +120,8 @@ mod tests {
             read_only: false,
             description: "bind mount from ./data".to_string(),
         });
-        let out = run(&state);
+        let ctx = dummy_ctx();
+        let out = run(&state, Some(&ctx));
         assert!(
             out.contains("/data"),
             "must show container path; got: {out}"
@@ -101,7 +143,8 @@ mod tests {
             read_only: true,
             description: "named volume: cfg".to_string(),
         });
-        let out = run(&state);
+        let ctx = dummy_ctx();
+        let out = run(&state, Some(&ctx));
         assert!(
             out.contains("[ro]"),
             "read-only mount must show [ro]; got: {out}"
@@ -118,7 +161,8 @@ mod tests {
             read_only: false,
             description: "named volume: npm-cache".to_string(),
         });
-        let out = run(&state);
+        let ctx = dummy_ctx();
+        let out = run(&state, Some(&ctx));
         assert!(
             out.contains("named volume: npm-cache"),
             "must show named volume; got: {out}"
@@ -135,7 +179,8 @@ mod tests {
             read_only: false,
             description: "anonymous volume".to_string(),
         });
-        let out = run(&state);
+        let ctx = dummy_ctx();
+        let out = run(&state, Some(&ctx));
         assert!(
             out.contains("anonymous volume"),
             "must show anonymous volume; got: {out}"
@@ -157,7 +202,8 @@ mod tests {
             read_only: false,
             description: "named volume: cache".to_string(),
         });
-        let out = run(&state);
+        let ctx = dummy_ctx();
+        let out = run(&state, Some(&ctx));
         assert!(
             out.contains("Mount shadows (2 total):"),
             "header must show count; got: {out}"
@@ -174,7 +220,8 @@ mod tests {
             read_only: false,
             description: "bind mount from \x1b[2J./data".to_string(),
         });
-        let out = run(&state);
+        let ctx = dummy_ctx();
+        let out = run(&state, Some(&ctx));
         assert!(
             !out.contains('\x1b'),
             "ANSI escapes must be stripped; got: {out:?}"

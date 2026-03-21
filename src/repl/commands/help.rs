@@ -39,6 +39,8 @@ CUSTOM COMMANDS (prefix with :)
   :warnings                show simulation warnings
   :reload                  re-read and re-process the Dockerfile
   :mounts                  list volume mount shadows (Compose mode)
+  :services                list all Compose services (Compose mode)
+  :depends                 show dependency tree (Compose mode)
 
 NOTE: demu is a preview shell. Commands show simulated state, not real containers.
 ";
@@ -145,6 +147,22 @@ mod tests {
         assert!(
             run().contains(":mounts"),
             "output must mention ':mounts' in the custom commands section"
+        );
+    }
+
+    #[test]
+    fn help_contains_services() {
+        assert!(
+            run().contains(":services"),
+            "output must mention ':services' in the custom commands section"
+        );
+    }
+
+    #[test]
+    fn help_contains_depends() {
+        assert!(
+            run().contains(":depends"),
+            "output must mention ':depends' in the custom commands section"
         );
     }
 }
