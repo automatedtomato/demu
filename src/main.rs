@@ -147,7 +147,7 @@ fn run_cli() -> Result<()> {
     // Warn if --service was passed without --compose. The flag is silently
     // ignored in Dockerfile mode, which would be very confusing to the user.
     if cli.service.is_some() {
-        eprintln!("demu: warning: --service is only valid with --compose; ignoring");
+        eprintln!("warning: --service is only valid with --compose; ignoring");
     }
 
     // ── 1. Validate the path ─────────────────────────────────────────────────

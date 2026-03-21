@@ -518,8 +518,12 @@ fn service_without_compose_emits_warning() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
+        stderr.contains("--service"),
+        "--service without --compose must mention '--service' in the warning; got: {stderr}"
+    );
+    assert!(
         stderr.contains("warning"),
-        "--service without --compose must emit a warning to stderr; got: {stderr}"
+        "--service without --compose must be prefixed with 'warning'; got: {stderr}"
     );
 }
 
