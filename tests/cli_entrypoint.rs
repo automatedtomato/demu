@@ -252,8 +252,8 @@ fn malformed_dockerfile_exits_one() {
         "parse error must begin with 'demu:' prefix, got: {stderr}"
     );
     assert!(
-        stderr.contains("parse") || stderr.contains("failed"),
-        "parse error must mention parse failure, got: {stderr}"
+        stderr.contains("parse"),
+        "parse error must mention 'parse', got: {stderr}"
     );
 }
 
@@ -325,6 +325,30 @@ fn stage_flag_exits_one_with_not_implemented_error() {
     assert!(
         stderr.contains("available stages"),
         "--stage error must list 'available stages', got: {stderr}"
+    );
+}
+
+// ── test 10b: --stage <valid-name> selects correct stage ─────────────────────
+
+#[test]
+fn valid_stage_name_exits_zero() {
+    // A two-stage Dockerfile with a named builder stage. Passing --stage builder
+    // should select the builder stage and exit 0 with EOF stdin.
+    let df = temp_dockerfile(
+        "FROM ubuntu:22.04 AS builder\nWORKDIR /build\nRUN echo done\nFROM scratch\nCOPY --from=builder /build /out\n",
+    );
+    let output = demu()
+        .args(["-f", df.path().to_str().expect("path"), "--stage", "builder"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run demu");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "--stage builder on valid two-stage Dockerfile must exit 0, got: {:?}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

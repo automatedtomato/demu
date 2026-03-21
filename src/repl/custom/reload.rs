@@ -722,8 +722,8 @@ mod tests {
             "stderr must contain 'warning:' for ImageOnlyService; got: {err}"
         );
         assert!(
-            err.contains("filesystem is empty") || err.contains("postgres"),
-            "warning must mention the image or empty filesystem; got: {err}"
+            err.contains("filesystem is empty"),
+            "ImageOnlyService warning must say 'filesystem is empty'; got: {err}"
         );
     }
 }
