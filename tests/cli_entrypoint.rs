@@ -338,7 +338,12 @@ fn valid_stage_name_exits_zero() {
         "FROM ubuntu:22.04 AS builder\nWORKDIR /build\nRUN echo done\nFROM scratch\nCOPY --from=builder /build /out\n",
     );
     let output = demu()
-        .args(["-f", df.path().to_str().expect("path"), "--stage", "builder"])
+        .args([
+            "-f",
+            df.path().to_str().expect("path"),
+            "--stage",
+            "builder",
+        ])
         .stdin(Stdio::null())
         .output()
         .expect("failed to run demu");
