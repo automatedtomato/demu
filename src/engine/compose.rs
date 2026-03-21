@@ -15,9 +15,15 @@
 //! 3. `ENV` instructions in the Dockerfile
 //!
 //! # Security notes
-//! - `env_file` paths are validated to stay within `compose_dir` via
-//!   canonicalization. Paths that escape the project root emit
-//!   [`Warning::EnvFileNotFound`] and are skipped.
+//! - `compose_dir` is canonicalized once at the start of `run_compose`. If it
+//!   cannot be resolved the function returns `ComposeEngineError::Io`.
+//! - `build.context` and `build.dockerfile` paths are canonicalized and checked
+//!   against `canonical_compose_dir` to prevent reading arbitrary host files via
+//!   path traversal (`../../../etc/passwd`). Paths that escape the root return
+//!   [`ComposeEngineError::DockerfileNotFound`].
+//! - `env_file` paths are validated with the same canonicalize-and-contains-check.
+//!   Paths that escape the project root emit [`Warning::EnvFileNotFound`] and are
+//!   skipped.
 //! - Service names and file paths embedded in error messages are sanitized
 //!   by the caller (`main.rs`) before terminal output.
 
@@ -93,6 +99,19 @@ pub fn run_compose(
     service_name: &str,
     compose_dir: &Path,
 ) -> Result<ComposeEngineOutput, ComposeEngineError> {
+    // ── 0. Canonicalize compose_dir once — required for all path-containment checks.
+    //
+    // Security: we fail hard here rather than using a fallback. If compose_dir
+    // cannot be resolved, all downstream containment checks would be unreliable.
+    let canonical_compose_dir = compose_dir
+        .canonicalize()
+        .map_err(|e| ComposeEngineError::Io {
+            message: format!(
+                "cannot canonicalize compose directory '{}': {e}",
+                compose_dir.display()
+            ),
+        })?;
+
     // ── 1. Select the service ─────────────────────────────────────────────────
 
     let service = compose_file.services.get(service_name).ok_or_else(|| {
@@ -105,27 +124,47 @@ pub fn run_compose(
 
     let mut state = match &service.build {
         Some(build_config) => {
-            // Resolve: compose_dir / context / dockerfile
-            let context_dir = compose_dir.join(&build_config.context);
-            let dockerfile_path = context_dir.join(&build_config.dockerfile);
+            // Security: canonicalize both the context directory and the Dockerfile
+            // path, and verify each stays within canonical_compose_dir.
+            // This prevents path-traversal attacks via `context: ../../..` or
+            // `dockerfile: ../../.ssh/id_rsa` in attacker-controlled YAML.
 
-            if !dockerfile_path.is_file() {
+            let resolved_context = compose_dir.join(&build_config.context);
+            let canonical_context = resolved_context.canonicalize().map_err(|_| {
+                ComposeEngineError::DockerfileNotFound {
+                    path: resolved_context.clone(),
+                }
+            })?;
+            if !canonical_context.starts_with(&canonical_compose_dir) {
                 return Err(ComposeEngineError::DockerfileNotFound {
-                    path: dockerfile_path,
+                    path: canonical_context,
                 });
             }
 
-            let content =
-                std::fs::read_to_string(&dockerfile_path).map_err(|e| ComposeEngineError::Io {
-                    message: format!("cannot read '{}': {e}", dockerfile_path.display()),
-                })?;
+            let resolved_dockerfile = canonical_context.join(&build_config.dockerfile);
+            let canonical_dockerfile = resolved_dockerfile.canonicalize().map_err(|_| {
+                ComposeEngineError::DockerfileNotFound {
+                    path: resolved_dockerfile.clone(),
+                }
+            })?;
+            if !canonical_dockerfile.starts_with(&canonical_compose_dir) {
+                return Err(ComposeEngineError::DockerfileNotFound {
+                    path: canonical_dockerfile,
+                });
+            }
+
+            let content = std::fs::read_to_string(&canonical_dockerfile).map_err(|e| {
+                ComposeEngineError::Io {
+                    message: format!("cannot read '{}': {e}", canonical_dockerfile.display()),
+                }
+            })?;
 
             let instructions =
                 parse_dockerfile(&content).map_err(|e| ComposeEngineError::ParseError {
                     message: e.to_string(),
                 })?;
 
-            let engine_output = engine::run(instructions, &context_dir).map_err(|e| {
+            let engine_output = engine::run(instructions, &canonical_context).map_err(|e| {
                 ComposeEngineError::EngineError {
                     message: e.to_string(),
                 }
@@ -147,13 +186,6 @@ pub fn run_compose(
     };
 
     // ── 3. Apply env_file entries (lower precedence than environment) ─────────
-
-    // Canonicalize compose_dir once for path-containment checks.
-    // If canonicalization fails (e.g. compose_dir does not exist), fall back
-    // to using it as-is — the env_file paths will simply fail to resolve.
-    let canonical_compose_dir = compose_dir
-        .canonicalize()
-        .unwrap_or_else(|_| compose_dir.to_path_buf());
 
     for env_file_path in &service.env_file {
         let resolved = compose_dir.join(env_file_path);
@@ -209,11 +241,22 @@ pub fn run_compose(
     // ── 5. Apply working_dir override ─────────────────────────────────────────
 
     if let Some(ref working_dir) = service.working_dir {
-        let new_cwd = if working_dir.is_absolute() {
+        let raw_cwd = if working_dir.is_absolute() {
             working_dir.clone()
         } else {
             state.cwd.join(working_dir)
         };
+
+        // Normalize the virtual path by resolving `..` components. Only emit
+        // WorkdirEscapedRoot when a `..` component was discarded because it
+        // would go above `/` (genuine root escape). Normal `..` resolution
+        // (e.g. `/app/../etc → /etc`) does not trigger the warning.
+        let (new_cwd, was_clamped) = normalize_virtual_path(&raw_cwd);
+        if was_clamped {
+            state.warnings.push(Warning::WorkdirEscapedRoot {
+                path: working_dir.clone(),
+            });
+        }
 
         // Ensure the directory and its ancestors exist in the virtual filesystem,
         // mirroring how the engine handles WORKDIR instructions.
@@ -243,13 +286,69 @@ pub fn run_compose(
     })
 }
 
+/// Normalize a virtual (non-host) path by resolving `..` components.
+///
+/// Unlike `Path::canonicalize`, this operates on the virtual filesystem and
+/// never touches the host. If `..` would traverse above the root `/`, that
+/// component is discarded (the stack is already empty, so the pop is a no-op)
+/// and the path is effectively clamped at `/`.
+///
+/// Returns `(normalized_path, was_clamped)` where `was_clamped` is `true` only
+/// when a `..` was discarded because the stack was already empty (genuine root
+/// escape). A `..` that pops a real segment (e.g. `/app/../etc → /etc`) does
+/// **not** set `was_clamped`.
+///
+/// # Examples
+/// ```text
+/// /app/../etc    →  /etc,  was_clamped = false  (normal resolution)
+/// /app/../../    →  /,     was_clamped = true   (genuine root escape)
+/// /a/b/c         →  /a/b/c, was_clamped = false (no change)
+/// ```
+fn normalize_virtual_path(path: &Path) -> (PathBuf, bool) {
+    use std::path::Component;
+
+    let mut components: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut was_clamped = false;
+
+    for component in path.components() {
+        match component {
+            Component::RootDir => {
+                components.clear();
+                // Push nothing — we rebuild the root at join time.
+            }
+            Component::Normal(seg) => {
+                components.push(seg);
+            }
+            Component::ParentDir => {
+                if components.is_empty() {
+                    // Would go above root — discard the component and record clamping.
+                    was_clamped = true;
+                } else {
+                    components.pop();
+                }
+            }
+            // CurDir (.) and Prefix are no-ops in this context.
+            Component::CurDir | Component::Prefix(_) => {}
+        }
+    }
+
+    let mut result = PathBuf::from("/");
+    for seg in components {
+        result.push(seg);
+    }
+    (result, was_clamped)
+}
+
 /// Parse a `.env` file and insert entries into `env`.
 ///
 /// Format rules (following Docker Compose env_file conventions):
 /// - Lines starting with `#` are comments and are skipped.
 /// - Empty or whitespace-only lines are skipped.
 /// - Lines of the form `KEY=value` are inserted; `value` may be empty.
-/// - Lines without `=` are skipped (not valid env entries in this context).
+/// - Lines without `=` are skipped (bare `KEY` form is not valid in env_file).
+/// - Inline comments (`KEY=value # comment`) are stripped from values.
+/// - A single matching pair of surrounding `"` or `'` quotes is removed from
+///   values (`KEY="hello"` → `hello`, `KEY='world'` → `world`).
 fn parse_env_file(content: &str, env: &mut std::collections::BTreeMap<String, String>) {
     for line in content.lines() {
         let line = line.trim();
@@ -257,16 +356,63 @@ fn parse_env_file(content: &str, env: &mut std::collections::BTreeMap<String, St
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        // Split on the first `=` only; everything after is the value.
+        // Split on the first `=` only; everything after is the raw value.
         if let Some(eq_pos) = line.find('=') {
             let key = &line[..eq_pos];
-            let value = &line[eq_pos + 1..];
-            if !key.is_empty() {
-                env.insert(key.to_string(), value.to_string());
+            let raw_value = &line[eq_pos + 1..];
+            if key.is_empty() {
+                continue;
             }
+
+            // Strip inline comment: `value # comment` → `value`.
+            // Only strip `#` that is preceded by unquoted whitespace so that
+            // values like `URL=http://host/#anchor` are not truncated.
+            let value_no_comment = strip_inline_comment(raw_value);
+
+            // Strip a single matching pair of surrounding quotes.
+            let value = strip_surrounding_quotes(value_no_comment);
+
+            env.insert(key.to_string(), value.to_string());
         }
         // Lines without `=` are skipped (bare KEY form is not valid in env_file).
     }
+}
+
+/// Strip an inline comment from an env file value.
+///
+/// A `#` is treated as the start of a comment only when it is preceded by
+/// at least one ASCII whitespace character and is not inside a quoted section.
+/// This handles the common case while preserving URLs with `#` fragments
+/// when the value is quoted.
+fn strip_inline_comment(value: &str) -> &str {
+    // If the value is quoted, do not strip inline comments — the whole quoted
+    // string is the value. The quote stripping happens afterward.
+    let trimmed = value.trim();
+    if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2)
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2)
+    {
+        return value;
+    }
+
+    // Find the first ` #` (space followed by hash) and truncate there.
+    if let Some(pos) = value.find(" #") {
+        return value[..pos].trim_end();
+    }
+    value.trim_end()
+}
+
+/// Strip a single matching pair of surrounding quotes from a value.
+///
+/// `"hello"` → `hello`, `'world'` → `world`.
+/// Unmatched or nested quotes are left as-is.
+fn strip_surrounding_quotes(value: &str) -> &str {
+    let v = value.trim();
+    if v.len() >= 2
+        && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')))
+    {
+        return &v[1..v.len() - 1];
+    }
+    v
 }
 
 #[cfg(test)]
@@ -672,5 +818,294 @@ mod tests {
 
         assert_eq!(output.state.mounts.len(), 1);
         assert_eq!(output.state.mounts[0].description, "named volume: my-cache");
+    }
+
+    // ── test 14: #60 — path traversal via build.context is rejected ───────────
+
+    #[test]
+    fn context_path_traversal_returns_dockerfile_not_found() {
+        let dir = TempDir::new().expect("tempdir");
+
+        // Try to escape the compose directory via `..` in the context path.
+        let service = Service {
+            build: Some(BuildConfig {
+                context: PathBuf::from("../.."),
+                dockerfile: PathBuf::from("Dockerfile"),
+            }),
+            ..bare_service("svc")
+        };
+        let compose = single_service_compose(service);
+
+        let err = run_compose(&compose, "svc", dir.path()).expect_err("should fail");
+        assert!(
+            matches!(err, ComposeEngineError::DockerfileNotFound { .. }),
+            "path traversal via context must return DockerfileNotFound; got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn dockerfile_path_traversal_returns_dockerfile_not_found() {
+        let dir = TempDir::new().expect("tempdir");
+        // Create a file outside the temp dir to verify the check triggers before reading.
+        // We just need the traversal attempt to be rejected regardless of whether
+        // the target exists.
+        let service = Service {
+            build: Some(BuildConfig {
+                context: PathBuf::from("."),
+                dockerfile: PathBuf::from("../../some_file"),
+            }),
+            ..bare_service("svc")
+        };
+        let compose = single_service_compose(service);
+
+        let err = run_compose(&compose, "svc", dir.path()).expect_err("should fail");
+        assert!(
+            matches!(err, ComposeEngineError::DockerfileNotFound { .. }),
+            "dockerfile path traversal must return DockerfileNotFound; got: {err:?}"
+        );
+    }
+
+    // ── test 15: #61 — working_dir with .. components is normalized ───────────
+
+    #[test]
+    fn working_dir_with_dotdot_is_normalized() {
+        let (dir, mut compose) = make_build_fixture("FROM scratch\nWORKDIR /app\n");
+
+        // Relative working_dir with `..` that would escape / — should be clamped.
+        compose.services.get_mut("svc").unwrap().working_dir = Some(PathBuf::from("../../../etc"));
+
+        let output = run_compose(&compose, "svc", dir.path()).expect("should succeed");
+
+        // The CWD must not contain `..` components.
+        let cwd_str = output.state.cwd.to_string_lossy();
+        assert!(
+            !cwd_str.contains(".."),
+            "normalized CWD must not contain '..'; got: {cwd_str}"
+        );
+
+        // A WorkdirEscapedRoot warning must be emitted.
+        let has_warning = output
+            .state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::WorkdirEscapedRoot { .. }));
+        assert!(has_warning, "must have WorkdirEscapedRoot warning");
+    }
+
+    #[test]
+    fn working_dir_absolute_with_dotdot_is_normalized() {
+        let (dir, mut compose) = make_build_fixture("FROM scratch\n");
+
+        // /app/../../etc: first .. pops app (stack non-empty → no clamp),
+        // second .. hits empty stack → genuine root escape → clamped → warning emitted.
+        compose.services.get_mut("svc").unwrap().working_dir =
+            Some(PathBuf::from("/app/../../etc"));
+
+        let output = run_compose(&compose, "svc", dir.path()).expect("should succeed");
+
+        assert_eq!(
+            output.state.cwd,
+            PathBuf::from("/etc"),
+            "absolute path with .. should normalize correctly"
+        );
+
+        // The second `..` escapes the virtual root, so WorkdirEscapedRoot must be emitted.
+        let has_warning = output
+            .state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::WorkdirEscapedRoot { .. }));
+        assert!(
+            has_warning,
+            "/app/../../etc has a genuine root escape — must emit WorkdirEscapedRoot"
+        );
+    }
+
+    #[test]
+    fn working_dir_dotdot_within_bounds_no_warning() {
+        let (dir, mut compose) = make_build_fixture("FROM scratch\n");
+
+        // /app/../etc: the .. pops app (stack non-empty → no clamping). No root escape.
+        compose.services.get_mut("svc").unwrap().working_dir = Some(PathBuf::from("/app/../etc"));
+
+        let output = run_compose(&compose, "svc", dir.path()).expect("should succeed");
+
+        assert_eq!(
+            output.state.cwd,
+            PathBuf::from("/etc"),
+            "path with single in-bounds .. should resolve to /etc"
+        );
+
+        let has_warning = output
+            .state
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::WorkdirEscapedRoot { .. }));
+        assert!(
+            !has_warning,
+            "/app/../etc does not escape root — must NOT emit WorkdirEscapedRoot"
+        );
+    }
+
+    // ── test 16: normalize_virtual_path unit tests ────────────────────────────
+
+    #[test]
+    fn normalize_virtual_path_resolves_dotdot() {
+        // Normal `..` resolution — no clamping.
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/app/../etc"));
+        assert_eq!(path, PathBuf::from("/etc"));
+        assert!(!clamped, "normal .. resolution must not set was_clamped");
+    }
+
+    #[test]
+    fn normalize_virtual_path_clamps_above_root() {
+        // `..` on an empty stack — genuine root escape → was_clamped = true.
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/../../etc"));
+        assert_eq!(path, PathBuf::from("/etc"));
+        assert!(clamped, "/../../etc must set was_clamped");
+    }
+
+    #[test]
+    fn normalize_virtual_path_no_change() {
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/app/data"));
+        assert_eq!(path, PathBuf::from("/app/data"));
+        assert!(!clamped, "path without .. must not set was_clamped");
+    }
+
+    #[test]
+    fn normalize_virtual_path_root() {
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/"));
+        assert_eq!(path, PathBuf::from("/"));
+        assert!(!clamped, "root path must not set was_clamped");
+    }
+
+    #[test]
+    fn normalize_virtual_path_dotdot_within_bounds_not_clamped() {
+        // /a/b/../c resolves to /a/c — the .. pops b (non-empty stack), so no clamping.
+        let (path, clamped) = normalize_virtual_path(&PathBuf::from("/a/b/../c"));
+        assert_eq!(path, PathBuf::from("/a/c"));
+        assert!(!clamped, "/a/b/../c must not set was_clamped");
+    }
+
+    // ── test 17: #62 — parse_env_file strips inline comments and quotes ───────
+
+    #[test]
+    fn parse_env_file_strips_inline_comment() {
+        let content = "KEY=value # this is a comment\n";
+        let mut env = BTreeMap::new();
+        parse_env_file(content, &mut env);
+        assert_eq!(
+            env.get("KEY").map(String::as_str),
+            Some("value"),
+            "inline comment must be stripped; got: {:?}",
+            env.get("KEY")
+        );
+    }
+
+    #[test]
+    fn parse_env_file_strips_double_quotes() {
+        let content = "KEY=\"hello world\"\n";
+        let mut env = BTreeMap::new();
+        parse_env_file(content, &mut env);
+        assert_eq!(
+            env.get("KEY").map(String::as_str),
+            Some("hello world"),
+            "double quotes must be stripped; got: {:?}",
+            env.get("KEY")
+        );
+    }
+
+    #[test]
+    fn parse_env_file_strips_single_quotes() {
+        let content = "KEY='single quoted'\n";
+        let mut env = BTreeMap::new();
+        parse_env_file(content, &mut env);
+        assert_eq!(
+            env.get("KEY").map(String::as_str),
+            Some("single quoted"),
+            "single quotes must be stripped; got: {:?}",
+            env.get("KEY")
+        );
+    }
+
+    #[test]
+    fn parse_env_file_url_with_hash_in_quotes_preserved() {
+        // A quoted URL with a `#` fragment should NOT have the fragment stripped.
+        let content = "URL=\"http://host/#anchor\"\n";
+        let mut env = BTreeMap::new();
+        parse_env_file(content, &mut env);
+        assert_eq!(
+            env.get("URL").map(String::as_str),
+            Some("http://host/#anchor"),
+            "hash in quoted value must be preserved; got: {:?}",
+            env.get("URL")
+        );
+    }
+
+    #[test]
+    fn parse_env_file_unquoted_url_with_equals_preserved() {
+        // Value with embedded `=` must not be truncated.
+        let content = "URL=https://example.com/?a=1\n";
+        let mut env = BTreeMap::new();
+        parse_env_file(content, &mut env);
+        assert_eq!(
+            env.get("URL").map(String::as_str),
+            Some("https://example.com/?a=1")
+        );
+    }
+
+    #[test]
+    fn parse_env_file_hash_without_space_is_preserved() {
+        // `#` without a preceding space is NOT a comment — it is part of the value.
+        // Docker Compose env_file spec: only ` #` (space then hash) starts a comment.
+        let content = "KEY=value#nospace\n";
+        let mut env = BTreeMap::new();
+        parse_env_file(content, &mut env);
+        assert_eq!(
+            env.get("KEY").map(String::as_str),
+            Some("value#nospace"),
+            "hash without preceding space must be preserved; got: {:?}",
+            env.get("KEY")
+        );
+    }
+
+    // ── test 18: dockerfile traversal starts_with guard (not just canonicalize ENOENT) ──
+
+    #[test]
+    fn dockerfile_path_traversal_rejected_by_containment_check() {
+        use std::fs;
+
+        // Create two sibling temp directories: compose_dir and outside_dir.
+        let compose_dir = TempDir::new().expect("compose tempdir");
+        let outside_dir = TempDir::new().expect("outside tempdir");
+
+        // Write a real file in outside_dir so canonicalize() succeeds on it.
+        let outside_dockerfile = outside_dir.path().join("Dockerfile");
+        fs::write(&outside_dockerfile, "FROM scratch\n").expect("write outside Dockerfile");
+
+        // Build a relative path from compose_dir that traverses to outside_dir.
+        // sibling_rel = "../<outside_dir_name>/Dockerfile"
+        let outside_name = outside_dir
+            .path()
+            .file_name()
+            .expect("outside dir name")
+            .to_str()
+            .expect("utf-8 name");
+        let dockerfile_rel = PathBuf::from(format!("../{outside_name}/Dockerfile"));
+
+        let service = Service {
+            build: Some(BuildConfig {
+                context: PathBuf::from("."),
+                dockerfile: dockerfile_rel,
+            }),
+            ..bare_service("svc")
+        };
+        let compose = single_service_compose(service);
+
+        let err = run_compose(&compose, "svc", compose_dir.path()).expect_err("should fail");
+        assert!(
+            matches!(err, ComposeEngineError::DockerfileNotFound { .. }),
+            "dockerfile path escaping compose_dir must be rejected by starts_with guard; got: {err:?}"
+        );
     }
 }
