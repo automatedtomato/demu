@@ -1,22 +1,24 @@
 # demu — task tracking
 
-v0.4.0 complete. Planning next milestone.
+Post-v0.4.0 fixes complete. Planning next milestone.
 
 ## In progress
 
-## Up next (post-v0.4.0 backlog — from code/security reviews)
-
-- [ ] [#60](https://github.com/automatedtomato/demu/issues/60) security: path traversal in compose engine — build.context not containment-checked [HIGH]
-- [ ] [#61](https://github.com/automatedtomato/demu/issues/61) fix: working_dir relative-path escape in virtual FS
-- [ ] [#62](https://github.com/automatedtomato/demu/issues/62) fix: parse_env_file does not strip inline comments or quoted values
-- [ ] [#63](https://github.com/automatedtomato/demu/issues/63) fix: :depends/:services silent wrong output when selected_service not in map
-- [ ] [#64](https://github.com/automatedtomato/demu/issues/64) fix: :depends DFS expands shared subtrees multiple times without warning
-- [ ] [#65](https://github.com/automatedtomato/demu/issues/65) refactor: ReplError::InvalidArguments wrong for I/O write failures
-- [ ] [#66](https://github.com/automatedtomato/demu/issues/66) fix: --service without --compose silently ignored
+## Up next
 
 ## Done
 
-- [x] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands — merged [#59](https://github.com/automatedtomato/demu/pull/59)
+- [x] [#60](https://github.com/automatedtomato/demu/issues/60) security: path traversal in compose engine — merged [#67](https://github.com/automatedtomato/demu/pull/67)
+- [x] [#61](https://github.com/automatedtomato/demu/issues/61) fix: working_dir escape — merged [#67](https://github.com/automatedtomato/demu/pull/67)
+- [x] [#62](https://github.com/automatedtomato/demu/issues/62) fix: parse_env_file comments/quotes — merged [#67](https://github.com/automatedtomato/demu/pull/67)
+- [x] [#63](https://github.com/automatedtomato/demu/issues/63) fix: :depends/:services invalid service warning — merged [#68](https://github.com/automatedtomato/demu/pull/68)
+- [x] [#64](https://github.com/automatedtomato/demu/issues/64) fix: :depends two-set DFS diamond deduplication — merged [#68](https://github.com/automatedtomato/demu/pull/68)
+- [x] [#65](https://github.com/automatedtomato/demu/issues/65) refactor: ReplError::Io variant — merged [#70](https://github.com/automatedtomato/demu/pull/70)
+- [x] [#66](https://github.com/automatedtomato/demu/issues/66) fix: --service without --compose warning — merged [#69](https://github.com/automatedtomato/demu/pull/69)
+
+## Done (v0.4.0 and earlier)
+
+- [x] [#52](https://github.com/automatedtomato/demu/issues/52) feat: REPL Compose commands (:services, :mounts, :depends) — merged [#59](https://github.com/automatedtomato/demu/pull/59)
 - [x] [#47](https://github.com/automatedtomato/demu/issues/47) feat: v0.4.0 Compose service preview [parent] — all child issues merged
 - [x] [#51](https://github.com/automatedtomato/demu/issues/51) feat: mount shadow model — merged [#58](https://github.com/automatedtomato/demu/pull/58)
 - [x] [#50](https://github.com/automatedtomato/demu/issues/50) feat: Compose engine — service merge — merged [#57](https://github.com/automatedtomato/demu/pull/57)
